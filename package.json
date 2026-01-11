@@ -1,6 +1,6 @@
 {
   "name": "book-to-mp3",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Convert books (FB2, EPUB, TXT) to MP3 using text-to-speech",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -17,7 +17,10 @@
     "electron:build:linux": "npm run build && electron-builder --linux",
     "preview": "vite preview",
     "setup": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-all.ps1",
-    "setup:silero": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-silero.ps1"
+    "setup:silero": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-silero.ps1",
+    "release": "node scripts/release.cjs",
+    "release:minor": "node scripts/release.cjs minor",
+    "release:major": "node scripts/release.cjs major"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.0",
