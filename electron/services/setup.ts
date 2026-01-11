@@ -116,7 +116,9 @@ async function downloadFile(
       if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 303 || response.statusCode === 307 || response.statusCode === 308) {
         const redirectUrl = response.headers.location
         if (redirectUrl) {
-          downloadFile(redirectUrl, destPath, onProgress).then(resolve).catch(reject)
+          // Handle relative redirect URLs by resolving against the original URL
+          const absoluteRedirectUrl = new URL(redirectUrl, url).href
+          downloadFile(absoluteRedirectUrl, destPath, onProgress).then(resolve).catch(reject)
           return
         }
       }
@@ -293,8 +295,8 @@ async function installPiperVoice(
     mkdirSync(voicePath, { recursive: true })
   }
 
-  const langLower = lang.toLowerCase().replace('_', '/')
-  const baseUrl = `https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/${langLower}/${name}/${quality}`
+  const langCode = lang.split('_')[0].toLowerCase()
+  const baseUrl = `https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/${langCode}/${lang}/${name}/${quality}`
 
   // Download .onnx model
   const onnxUrl = `${baseUrl}/${fileName}.onnx`
