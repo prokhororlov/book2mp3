@@ -3,6 +3,7 @@ import path from 'path'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { app } from 'electron'
+import { checkSileroInstalled } from './setup'
 
 const execAsync = promisify(exec)
 
@@ -152,8 +153,8 @@ export async function getVoicesForLanguage(language: string, provider?: TTSProvi
     allVoices = allVoices.concat(PIPER_VOICES[language] || [])
   }
 
-  // Silero requires Python environment, only available in dev mode
-  if ((!provider || provider === 'silero') && !app.isPackaged) {
+  // Silero requires Python environment to be set up
+  if ((!provider || provider === 'silero') && checkSileroInstalled()) {
     allVoices = allVoices.concat(SILERO_VOICES[language] || [])
   }
 
