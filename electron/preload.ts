@@ -32,6 +32,21 @@ export interface ConversionProgress {
   status: string
 }
 
+export interface SetupProgress {
+  stage: string
+  progress: number
+  details: string
+}
+
+export interface DependencyStatus {
+  piper: boolean
+  ffmpeg: boolean
+  piperVoices: {
+    ruRU: string[]
+    enUS: string[]
+  }
+}
+
 const electronAPI = {
   openFileDialog: (): Promise<string | null> =>
     ipcRenderer.invoke('open-file-dialog'),
@@ -44,6 +59,9 @@ const electronAPI = {
 
   getVoices: (language: string): Promise<VoiceInfo[]> =>
     ipcRenderer.invoke('get-voices', language).then(result => result.voices || []),
+
+  getAvailableProviders: (): Promise<Array<{ id: string; name: string; description: string }>> =>
+    ipcRenderer.invoke('get-available-providers'),
 
   convertToSpeech: (
     text: string,
@@ -66,6 +84,30 @@ const electronAPI = {
     const handler = (_event: Electron.IpcRendererEvent, data: ConversionProgress) => callback(data)
     ipcRenderer.on('conversion-progress', handler)
     return () => ipcRenderer.removeListener('conversion-progress', handler)
+  },
+
+  // Setup/dependency management
+  checkDependencies: (): Promise<DependencyStatus> =>
+    ipcRenderer.invoke('check-dependencies'),
+
+  needsSetup: (): Promise<boolean> =>
+    ipcRenderer.invoke('needs-setup'),
+
+  runSetup: (options?: {
+    installPiper?: boolean
+    installFfmpeg?: boolean
+    installRussianVoices?: boolean
+    installEnglishVoices?: boolean
+  }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('run-setup', options),
+
+  getEstimatedDownloadSize: (): Promise<number> =>
+    ipcRenderer.invoke('get-estimated-download-size'),
+
+  onSetupProgress: (callback: (data: SetupProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: SetupProgress) => callback(data)
+    ipcRenderer.on('setup-progress', handler)
+    return () => ipcRenderer.removeListener('setup-progress', handler)
   },
 }
 

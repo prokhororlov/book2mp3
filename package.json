@@ -62,33 +62,18 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "tts_resources/piper",
-        "to": "tts_resources/piper",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "tts_resources/ffmpeg",
-        "to": "tts_resources/ffmpeg",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "portable",
           "arch": ["x64"]
         },
         {
           "target": "zip",
           "arch": ["x64"]
         }
-      ]
+      ],
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,

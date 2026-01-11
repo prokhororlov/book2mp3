@@ -152,7 +152,8 @@ export async function getVoicesForLanguage(language: string, provider?: TTSProvi
     allVoices = allVoices.concat(PIPER_VOICES[language] || [])
   }
 
-  if (!provider || provider === 'silero') {
+  // Silero requires Python environment, only available in dev mode
+  if ((!provider || provider === 'silero') && !app.isPackaged) {
     allVoices = allVoices.concat(SILERO_VOICES[language] || [])
   }
 
@@ -175,15 +176,26 @@ export function getSupportedLanguages(): Array<{ code: string; name: string }> {
 }
 
 export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; description: string }> {
-  return [
+  const providers: Array<{ id: TTSProvider; name: string; description: string }> = [
     { id: 'rhvoice', name: 'RHVoice', description: 'Windows SAPI (fastest)' },
     { id: 'piper', name: 'Piper', description: 'ONNX models (medium quality)' },
-    { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, slow)' },
     { id: 'elevenlabs', name: 'ElevenLabs', description: 'Cloud API (premium quality, requires API key)' }
   ]
+
+  // Silero requires Python environment, only available in dev mode
+  if (!app.isPackaged) {
+    providers.splice(2, 0, { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, slow)' })
+  }
+
+  return providers
 }
 
 export function isProviderAvailableForLanguage(provider: TTSProvider, language: string): boolean {
+  // Silero requires Python environment, only available in dev mode
+  if (provider === 'silero' && app.isPackaged) {
+    return false
+  }
+
   switch (provider) {
     case 'rhvoice':
       return RHVOICE_VOICES[language] !== undefined
@@ -198,10 +210,10 @@ export function isProviderAvailableForLanguage(provider: TTSProvider, language: 
   }
 }
 
-// Get path to resources
+// Get path to resources - uses userData for packaged app (dependencies installed at runtime)
 function getResourcesPath(): string {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'tts_resources')
+    return path.join(app.getPath('userData'), 'tts_resources')
   } else {
     return path.join(process.cwd(), 'tts_resources')
   }
@@ -209,11 +221,7 @@ function getResourcesPath(): string {
 
 
 function getPiperResourcesPath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'tts_resources', 'piper')
-  } else {
-    return path.join(process.cwd(), 'tts_resources', 'piper')
-  }
+  return path.join(getResourcesPath(), 'piper')
 }
 
 // Get path to Piper executable

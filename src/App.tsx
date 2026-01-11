@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2 } from 'lucide-react'
+import { SetupScreen } from '@/components/SetupScreen'
 
 interface BookContent {
   title: string
@@ -52,34 +53,16 @@ const LANGUAGES = [
   { code: 'en', name: 'English' },
 ]
 
-const PROVIDERS: ProviderInfo[] = [
-  {
-    id: 'rhvoice',
-    name: 'RHVoice',
-    description: 'Windows SAPI (fastest)',
-    icon: <Zap className="h-4 w-4" />
-  },
-  {
-    id: 'piper',
-    name: 'Piper',
-    description: 'ONNX models (medium quality)',
-    icon: <Cpu className="h-4 w-4" />
-  },
-  {
-    id: 'silero',
-    name: 'Silero',
-    description: 'PyTorch models (best quality, slow)',
-    icon: <Sparkles className="h-4 w-4" />
-  },
-  {
-    id: 'elevenlabs',
-    name: 'ElevenLabs',
-    description: 'Cloud API (premium quality, requires API key)',
-    icon: <Cloud className="h-4 w-4" />
-  },
-]
+// Provider icons mapping
+const PROVIDER_ICONS: Record<string, React.ReactNode> = {
+  rhvoice: <Zap className="h-4 w-4" />,
+  piper: <Cpu className="h-4 w-4" />,
+  silero: <Sparkles className="h-4 w-4" />,
+  elevenlabs: <Cloud className="h-4 w-4" />,
+}
 
 function App() {
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [file, setFile] = useState<FileInfo | null>(null)
   const [bookContent, setBookContent] = useState<BookContent | null>(null)
   // Auto-detect system language, default to Russian
@@ -89,9 +72,41 @@ function App() {
     if (systemLang.startsWith('en')) return 'en'
     return 'ru-RU' // Default to Russian
   })
+
+  // Check if setup is needed on app start
+  useEffect(() => {
+    const checkSetup = async () => {
+      if (!window.electronAPI) {
+        setNeedsSetup(false)
+        return
+      }
+      const needs = await window.electronAPI.needsSetup()
+      setNeedsSetup(needs)
+    }
+    checkSetup()
+  }, [])
+
+  // Fetch available providers from backend
+  useEffect(() => {
+    const fetchProviders = async () => {
+      if (!window.electronAPI) return
+      try {
+        const providers = await window.electronAPI.getAvailableProviders()
+        const providersWithIcons: ProviderInfo[] = providers.map(p => ({
+          ...p,
+          icon: PROVIDER_ICONS[p.id] || <Cpu className="h-4 w-4" />
+        }))
+        setAvailableProviders(providersWithIcons)
+      } catch (err) {
+        console.error('Failed to fetch providers:', err)
+      }
+    }
+    fetchProviders()
+  }, [])
   const [voices, setVoices] = useState<VoiceInfo[]>([])
   const [selectedVoice, setSelectedVoice] = useState<string>('')
   const [selectedProvider, setSelectedProvider] = useState<string>('piper')
+  const [availableProviders, setAvailableProviders] = useState<ProviderInfo[]>([])
   const [speed, setSpeed] = useState([1.0])
   const [isConverting, setIsConverting] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -404,6 +419,20 @@ function App() {
     return voices.some(v => v.provider === providerId)
   }
 
+  // Show loading while checking setup status
+  if (needsSetup === null) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  // Show setup screen if needed
+  if (needsSetup) {
+    return <SetupScreen onSetupComplete={() => setNeedsSetup(false)} />
+  }
+
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-4xl mx-auto space-y-4">
@@ -512,7 +541,7 @@ function App() {
                 <div className="space-y-1.5">
                   <Label className="text-sm">TTS Provider</Label>
                   <div className="grid grid-cols-4 gap-1.5">
-                    {PROVIDERS.map(provider => {
+                    {availableProviders.map(provider => {
                       const isAvailable = getProviderAvailability(provider.id)
                       const isSelected = selectedProvider === provider.id
                       return (

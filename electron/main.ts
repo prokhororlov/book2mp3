@@ -3,7 +3,8 @@ import path from 'path'
 import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
-import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey } from './services/tts'
+import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders } from './services/tts'
+import { checkDependencies, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress } from './services/setup'
 
 // Load environment variables from .env file
 config()
@@ -115,6 +116,10 @@ ipcMain.handle('get-voices', async (_event, language: string) => {
   }
 })
 
+ipcMain.handle('get-available-providers', () => {
+  return getAvailableProviders()
+})
+
 let conversionAborted = false
 
 ipcMain.handle('convert-to-speech', async (
@@ -174,4 +179,33 @@ ipcMain.handle('get-file-info', async (_event, filePath: string) => {
 
 ipcMain.handle('preview-voice', async (_event, text: string, voiceShortName: string) => {
   return await previewVoice(text, voiceShortName)
+})
+
+// Setup/dependency management handlers
+ipcMain.handle('check-dependencies', async () => {
+  return checkDependencies()
+})
+
+ipcMain.handle('needs-setup', async () => {
+  return needsSetup()
+})
+
+ipcMain.handle('get-estimated-download-size', async () => {
+  return getEstimatedDownloadSize()
+})
+
+ipcMain.handle('run-setup', async (event, options?: {
+  installPiper?: boolean
+  installFfmpeg?: boolean
+  installRussianVoices?: boolean
+  installEnglishVoices?: boolean
+}) => {
+  try {
+    await runSetup((progress: SetupProgress) => {
+      event.sender.send('setup-progress', progress)
+    }, options)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
 })
