@@ -1,6 +1,6 @@
 {
   "name": "book-to-mp3",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Convert books (FB2, EPUB, TXT) to MP3 using text-to-speech",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -69,11 +69,15 @@
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "signAndEditExecutable": false
