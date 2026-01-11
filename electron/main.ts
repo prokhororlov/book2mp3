@@ -4,15 +4,10 @@ import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
 import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders } from './services/tts'
-import { checkDependencies, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress } from './services/setup'
+import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, checkPythonAvailable } from './services/setup'
 
 // Load environment variables from .env file
 config()
-
-// Initialize ElevenLabs API key from environment
-if (process.env.ELEVENLABS_API_KEY) {
-  setElevenLabsApiKey(process.env.ELEVENLABS_API_KEY)
-}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -49,7 +44,25 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  // Load saved ElevenLabs API key, env variable takes priority
+  if (process.env.ELEVENLABS_API_KEY) {
+    setElevenLabsApiKey(process.env.ELEVENLABS_API_KEY)
+  } else {
+    try {
+      const settingsPath = path.join(app.getPath('userData'), 'settings.json')
+      if (fs.existsSync(settingsPath)) {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+        if (settings.elevenLabsApiKey) {
+          setElevenLabsApiKey(settings.elevenLabsApiKey)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load saved API key:', error)
+    }
+  }
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -186,12 +199,85 @@ ipcMain.handle('check-dependencies', async () => {
   return checkDependencies()
 })
 
+ipcMain.handle('check-dependencies-async', async () => {
+  return checkDependenciesAsync()
+})
+
+ipcMain.handle('check-python-available', async () => {
+  const pythonCmd = await checkPythonAvailable()
+  return pythonCmd !== null
+})
+
+ipcMain.handle('install-silero', async (event) => {
+  try {
+    const result = await installSilero((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
 ipcMain.handle('needs-setup', async () => {
   return needsSetup()
 })
 
 ipcMain.handle('get-estimated-download-size', async () => {
   return getEstimatedDownloadSize()
+})
+
+// Settings file path
+function getSettingsPath(): string {
+  return path.join(app.getPath('userData'), 'settings.json')
+}
+
+// Load settings from file
+function loadSettings(): Record<string, unknown> {
+  try {
+    const settingsPath = getSettingsPath()
+    if (fs.existsSync(settingsPath)) {
+      const data = fs.readFileSync(settingsPath, 'utf-8')
+      return JSON.parse(data)
+    }
+  } catch (error) {
+    console.error('Failed to load settings:', error)
+  }
+  return {}
+}
+
+// Save settings to file
+function saveSettings(settings: Record<string, unknown>): void {
+  try {
+    const settingsPath = getSettingsPath()
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+  }
+}
+
+// ElevenLabs API key handlers
+ipcMain.handle('get-elevenlabs-api-key', async () => {
+  // First check if already set in memory (from env or previous call)
+  const currentKey = getElevenLabsApiKey()
+  if (currentKey) return currentKey
+
+  // Otherwise load from settings
+  const settings = loadSettings()
+  const savedKey = settings.elevenLabsApiKey as string | undefined
+  if (savedKey) {
+    setElevenLabsApiKey(savedKey)
+    return savedKey
+  }
+  return null
+})
+
+ipcMain.handle('set-elevenlabs-api-key', async (_event, apiKey: string) => {
+  setElevenLabsApiKey(apiKey)
+  const settings = loadSettings()
+  settings.elevenLabsApiKey = apiKey
+  saveSettings(settings)
+  return { success: true }
 })
 
 ipcMain.handle('run-setup', async (event, options?: {

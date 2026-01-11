@@ -6,7 +6,7 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2 } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff } from 'lucide-react'
 import { SetupScreen } from '@/components/SetupScreen'
 
 interface BookContent {
@@ -36,6 +36,7 @@ interface ProviderInfo {
   name: string
   description: string
   icon: React.ReactNode
+  requiresSetup?: boolean
 }
 
 // Sanitize filename - remove invalid characters
@@ -125,6 +126,49 @@ function App() {
     const stored = localStorage.getItem('theme')
     return (stored === 'dark' || stored === 'light' || stored === 'system') ? stored : 'system'
   })
+
+  // ElevenLabs API key state
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState<string>('')
+  const [isEditingApiKey, setIsEditingApiKey] = useState(false)
+  const [tempApiKey, setTempApiKey] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [hasApiKey, setHasApiKey] = useState(false)
+
+  // Silero state
+  const [sileroInstalled, setSileroInstalled] = useState(false)
+  const [pythonAvailable, setPythonAvailable] = useState(false)
+  const [isInstallingSilero, setIsInstallingSilero] = useState(false)
+  const [sileroInstallProgress, setSileroInstallProgress] = useState('')
+
+  // Load ElevenLabs API key and check Silero on mount
+  useEffect(() => {
+    const loadApiKey = async () => {
+      if (!window.electronAPI) return
+      try {
+        const key = await window.electronAPI.getElevenLabsApiKey()
+        if (key) {
+          setElevenLabsApiKey(key)
+          setHasApiKey(true)
+        }
+      } catch (err) {
+        console.error('Failed to load ElevenLabs API key:', err)
+      }
+    }
+
+    const checkSilero = async () => {
+      if (!window.electronAPI) return
+      try {
+        const deps = await window.electronAPI.checkDependenciesAsync()
+        setSileroInstalled(deps.silero)
+        setPythonAvailable(deps.sileroAvailable)
+      } catch (err) {
+        console.error('Failed to check Silero status:', err)
+      }
+    }
+
+    loadApiKey()
+    checkSilero()
+  }, [])
 
   // Get actual theme based on system preference
   const getEffectiveTheme = useCallback(() => {
@@ -564,6 +608,165 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              {/* ElevenLabs API Key Input */}
+              {selectedProvider === 'elevenlabs' && (
+                <div className="space-y-1.5">
+                  <Label className="text-sm flex items-center gap-1.5">
+                    <Key className="h-3.5 w-3.5" />
+                    ElevenLabs API Key
+                  </Label>
+                  {!isEditingApiKey && hasApiKey ? (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-9 px-3 py-2 border rounded-md bg-muted text-sm text-muted-foreground flex items-center">
+                        {showApiKey ? elevenLabsApiKey : '••••••••••••••••••••'}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                      >
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => {
+                          setTempApiKey(elevenLabsApiKey)
+                          setIsEditingApiKey(true)
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        value={tempApiKey}
+                        onChange={(e) => setTempApiKey(e.target.value)}
+                        placeholder="Enter your ElevenLabs API key"
+                        className="flex-1 h-9 px-3 py-2 border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                      >
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <Button
+                        variant="default"
+                        size="icon"
+                        className="h-9 w-9"
+                        disabled={!tempApiKey.trim()}
+                        onClick={async () => {
+                          if (!window.electronAPI || !tempApiKey.trim()) return
+                          await window.electronAPI.setElevenLabsApiKey(tempApiKey.trim())
+                          setElevenLabsApiKey(tempApiKey.trim())
+                          setHasApiKey(true)
+                          setIsEditingApiKey(false)
+                          setTempApiKey('')
+                        }}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      {hasApiKey && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() => {
+                            setIsEditingApiKey(false)
+                            setTempApiKey('')
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Get your API key from <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">elevenlabs.io</a>
+                  </p>
+                </div>
+              )}
+
+              {/* Silero Setup Notice */}
+              {selectedProvider === 'silero' && !sileroInstalled && (
+                <div className="space-y-2 p-3 border rounded-md bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">Silero Setup Required</span>
+                  </div>
+                  {!pythonAvailable ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Silero requires Python 3.9+ to be installed on your system.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Download Python from{' '}
+                        <a
+                          href="https://www.python.org/downloads/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline hover:text-foreground"
+                        >
+                          python.org
+                        </a>
+                        {' '}and restart the application.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Silero needs to download PyTorch and models (~500MB). This is a one-time setup.
+                      </p>
+                      {isInstallingSilero ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-sm">{sileroInstallProgress || 'Installing...'}</span>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={async () => {
+                            if (!window.electronAPI) return
+                            setIsInstallingSilero(true)
+                            setSileroInstallProgress('Starting installation...')
+
+                            const unsubscribe = window.electronAPI.onSetupProgress(({ details }) => {
+                              setSileroInstallProgress(details)
+                            })
+
+                            try {
+                              const result = await window.electronAPI.installSilero()
+                              if (result.success) {
+                                setSileroInstalled(true)
+                                setSileroInstallProgress('')
+                              } else {
+                                setError(result.error || 'Silero installation failed')
+                              }
+                            } catch (err) {
+                              setError((err as Error).message)
+                            } finally {
+                              setIsInstallingSilero(false)
+                              unsubscribe()
+                            }
+                          }}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Install Silero
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Voice & Speed Row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

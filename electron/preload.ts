@@ -41,6 +41,8 @@ export interface SetupProgress {
 export interface DependencyStatus {
   piper: boolean
   ffmpeg: boolean
+  silero: boolean
+  sileroAvailable: boolean
   piperVoices: {
     ruRU: string[]
     enUS: string[]
@@ -90,6 +92,15 @@ const electronAPI = {
   checkDependencies: (): Promise<DependencyStatus> =>
     ipcRenderer.invoke('check-dependencies'),
 
+  checkDependenciesAsync: (): Promise<DependencyStatus> =>
+    ipcRenderer.invoke('check-dependencies-async'),
+
+  checkPythonAvailable: (): Promise<boolean> =>
+    ipcRenderer.invoke('check-python-available'),
+
+  installSilero: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-silero'),
+
   needsSetup: (): Promise<boolean> =>
     ipcRenderer.invoke('needs-setup'),
 
@@ -103,6 +114,13 @@ const electronAPI = {
 
   getEstimatedDownloadSize: (): Promise<number> =>
     ipcRenderer.invoke('get-estimated-download-size'),
+
+  // ElevenLabs API key management
+  getElevenLabsApiKey: (): Promise<string | null> =>
+    ipcRenderer.invoke('get-elevenlabs-api-key'),
+
+  setElevenLabsApiKey: (apiKey: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('set-elevenlabs-api-key', apiKey),
 
   onSetupProgress: (callback: (data: SetupProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: SetupProgress) => callback(data)

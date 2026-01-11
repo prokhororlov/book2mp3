@@ -175,15 +175,13 @@ export function getSupportedLanguages(): Array<{ code: string; name: string }> {
   ]
 }
 
-export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; description: string }> {
-  const providers: Array<{ id: TTSProvider; name: string; description: string }> = [
+export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; description: string; requiresSetup?: boolean }> {
+  const providers: Array<{ id: TTSProvider; name: string; description: string; requiresSetup?: boolean }> = [
     { id: 'rhvoice', name: 'RHVoice', description: 'Windows SAPI (fastest)' },
     { id: 'piper', name: 'Piper', description: 'ONNX models (medium quality)' },
+    { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, requires Python)', requiresSetup: true },
     { id: 'elevenlabs', name: 'ElevenLabs', description: 'Cloud API (premium quality, requires API key)' }
   ]
-
-  // Silero requires Python environment setup
-  providers.splice(2, 0, { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, slow)' })
 
   return providers
 }
@@ -348,6 +346,7 @@ async function generateSpeechWithPiper(
   }
 
   const piperExe = getPiperExecutable()
+  const piperDir = path.dirname(piperExe)
 
   let lengthScale = 1.0
   if (options.rate) {
@@ -370,7 +369,8 @@ async function generateSpeechWithPiper(
       '--length_scale', lengthScale.toFixed(2)
     ]
 
-    const piperProcess = spawn(piperExe, args)
+    // Run piper from its own directory so it can find DLLs
+    const piperProcess = spawn(piperExe, args, { cwd: piperDir })
     let stderr = ''
 
     piperProcess.stderr?.on('data', (data) => {

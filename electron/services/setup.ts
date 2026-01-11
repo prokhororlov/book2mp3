@@ -18,6 +18,8 @@ export interface SetupProgress {
 export interface DependencyStatus {
   piper: boolean
   ffmpeg: boolean
+  silero: boolean
+  sileroAvailable: boolean // true if Python is available for Silero setup
   piperVoices: {
     ruRU: string[]
     enUS: string[]
@@ -39,6 +41,36 @@ export function getPiperResourcesPath(): string {
 
 export function getFfmpegPath(): string {
   return path.join(getResourcesPath(), 'ffmpeg')
+}
+
+export function getSileroPath(): string {
+  return path.join(getResourcesPath(), 'silero')
+}
+
+// Check if system Python is available
+export async function checkPythonAvailable(): Promise<string | null> {
+  const pythonCommands = ['python', 'python3', 'py']
+
+  for (const cmd of pythonCommands) {
+    try {
+      const { stdout } = await execAsync(`${cmd} --version`, { timeout: 5000 })
+      if (stdout.includes('Python 3')) {
+        return cmd
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+// Check if Silero venv is set up and working
+export function checkSileroInstalled(): boolean {
+  const sileroPath = getSileroPath()
+  const venvPython = path.join(sileroPath, 'venv', 'Scripts', 'python.exe')
+  const generateScript = path.join(sileroPath, 'generate.py')
+
+  return existsSync(venvPython) && existsSync(generateScript)
 }
 
 // Check which dependencies are installed
@@ -73,9 +105,14 @@ export function checkDependencies(): DependencyStatus {
     }
   }
 
+  // Check Silero
+  const sileroInstalled = checkSileroInstalled()
+
   return {
     piper: existsSync(piperExe),
     ffmpeg: existsSync(ffmpegExe),
+    silero: sileroInstalled,
+    sileroAvailable: false, // Will be set by async check
     piperVoices: {
       ruRU: installedRuVoices,
       enUS: installedEnVoices
@@ -95,6 +132,14 @@ export function needsSetup(): boolean {
   // Need at least one voice
   const totalVoices = status.piperVoices.ruRU.length + status.piperVoices.enUS.length
   return totalVoices === 0
+}
+
+// Async version of checkDependencies that also checks Python availability
+export async function checkDependenciesAsync(): Promise<DependencyStatus> {
+  const status = checkDependencies()
+  const pythonCmd = await checkPythonAvailable()
+  status.sileroAvailable = pythonCmd !== null
+  return status
 }
 
 // Download file with progress tracking
@@ -412,4 +457,175 @@ export function getEstimatedDownloadSize(): number {
   size += (missingRuVoices + missingEnVoices) * 20
 
   return size
+}
+
+// Install Silero TTS (requires Python to be installed on system)
+export async function installSilero(
+  onProgress: (progress: SetupProgress) => void
+): Promise<{ success: boolean; error?: string }> {
+  const pythonCmd = await checkPythonAvailable()
+
+  if (!pythonCmd) {
+    return {
+      success: false,
+      error: 'Python 3 is not installed. Please install Python 3.9+ from python.org'
+    }
+  }
+
+  const sileroPath = getSileroPath()
+  const venvPath = path.join(sileroPath, 'venv')
+  const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+
+  try {
+    // Create silero directory
+    if (!existsSync(sileroPath)) {
+      mkdirSync(sileroPath, { recursive: true })
+    }
+
+    // Create virtual environment
+    onProgress({
+      stage: 'silero',
+      progress: 10,
+      details: 'Creating Python virtual environment...'
+    })
+
+    await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+
+    if (!existsSync(venvPython)) {
+      return { success: false, error: 'Failed to create virtual environment' }
+    }
+
+    // Upgrade pip
+    onProgress({
+      stage: 'silero',
+      progress: 20,
+      details: 'Upgrading pip...'
+    })
+
+    await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+      timeout: 120000,
+      maxBuffer: 1024 * 1024 * 10
+    })
+
+    // Install PyTorch CPU
+    onProgress({
+      stage: 'silero',
+      progress: 30,
+      details: 'Installing PyTorch (this may take several minutes)...'
+    })
+
+    await execAsync(
+      `"${venvPython}" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-input`,
+      { timeout: 600000, maxBuffer: 1024 * 1024 * 50 }
+    )
+
+    // Install additional dependencies
+    onProgress({
+      stage: 'silero',
+      progress: 80,
+      details: 'Installing additional dependencies...'
+    })
+
+    await execAsync(`"${venvPython}" -m pip install omegaconf --no-input`, {
+      timeout: 120000,
+      maxBuffer: 1024 * 1024 * 10
+    })
+
+    // Copy generate.py script
+    onProgress({
+      stage: 'silero',
+      progress: 90,
+      details: 'Setting up generation script...'
+    })
+
+    const generateScript = getGenerateScriptContent()
+    fs.writeFileSync(path.join(sileroPath, 'generate.py'), generateScript, 'utf-8')
+
+    // Verify installation
+    onProgress({
+      stage: 'silero',
+      progress: 95,
+      details: 'Verifying installation...'
+    })
+
+    const { stdout } = await execAsync(`"${venvPython}" -c "import torch; print('OK')"`, { timeout: 30000 })
+
+    if (!stdout.includes('OK')) {
+      return { success: false, error: 'PyTorch verification failed' }
+    }
+
+    onProgress({
+      stage: 'silero',
+      progress: 100,
+      details: 'Silero installation complete!'
+    })
+
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+}
+
+// Generate.py script content for Silero
+function getGenerateScriptContent(): string {
+  return `#!/usr/bin/env python3
+import argparse
+import torch
+import os
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--text', required=True, help='Text to synthesize')
+    parser.add_argument('--speaker', required=True, help='Speaker ID (e.g., xenia, baya, eugene)')
+    parser.add_argument('--output', required=True, help='Output WAV file path')
+    parser.add_argument('--sample_rate', type=int, default=48000)
+    args = parser.parse_args()
+
+    device = torch.device('cpu')
+
+    # Determine language from speaker
+    ru_speakers = ['xenia', 'baya', 'kseniya', 'aidar', 'eugene', 'random']
+    en_speakers = ['en_0', 'en_1', 'en_2', 'en_3', 'en_4']
+
+    if args.speaker in ru_speakers:
+        model, _ = torch.hub.load(
+            repo_or_dir='snakers4/silero-models',
+            model='silero_tts',
+            language='ru',
+            speaker='v4_ru'
+        )
+    else:
+        model, _ = torch.hub.load(
+            repo_or_dir='snakers4/silero-models',
+            model='silero_tts',
+            language='en',
+            speaker='v3_en'
+        )
+
+    model.to(device)
+
+    audio = model.apply_tts(
+        text=args.text,
+        speaker=args.speaker,
+        sample_rate=args.sample_rate
+    )
+
+    # Save as WAV
+    import wave
+    import struct
+
+    with wave.open(args.output, 'w') as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(args.sample_rate)
+
+        # Convert float tensor to int16
+        audio_int16 = (audio * 32767).to(torch.int16)
+        wav_file.writeframes(audio_int16.numpy().tobytes())
+
+    print(f'Audio saved to {args.output}')
+
+if __name__ == '__main__':
+    main()
+`
 }
