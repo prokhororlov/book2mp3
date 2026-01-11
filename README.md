@@ -2,6 +2,8 @@
 
 Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech technologies.
 
+<img width="3119" height="1983" alt="image" src="https://github.com/user-attachments/assets/487dd82b-a391-48d5-8db6-8da3cefd18b3" />
+
 ## Features
 
 - **Four TTS providers** - RHVoice, Piper, Silero and ElevenLabs
