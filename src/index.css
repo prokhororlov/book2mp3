@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Claude Theme from tweakcn */
+@layer base {
+  :root {
+    --background: 30 25% 98%;
+    --foreground: 30 10% 10%;
+    --card: 30 20% 96%;
+    --card-foreground: 30 10% 10%;
+    --popover: 30 25% 98%;
+    --popover-foreground: 30 10% 10%;
+    --primary: 24 75% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 30 15% 92%;
+    --secondary-foreground: 30 10% 20%;
+    --muted: 30 15% 92%;
+    --muted-foreground: 30 10% 45%;
+    --accent: 24 70% 95%;
+    --accent-foreground: 24 75% 35%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 15% 88%;
+    --input: 30 15% 88%;
+    --ring: 24 75% 50%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 30 10% 8%;
+    --foreground: 30 10% 95%;
+    --card: 30 10% 12%;
+    --card-foreground: 30 10% 95%;
+    --popover: 30 10% 8%;
+    --popover-foreground: 30 10% 95%;
+    --primary: 24 80% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 30 10% 18%;
+    --secondary-foreground: 30 10% 90%;
+    --muted: 30 10% 18%;
+    --muted-foreground: 30 10% 60%;
+    --accent: 24 50% 20%;
+    --accent-foreground: 24 80% 70%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 10% 22%;
+    --input: 30 10% 22%;
+    --ring: 24 80% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Drag and drop zone styles */
+.dropzone-active {
+  @apply border-primary bg-accent;
+}

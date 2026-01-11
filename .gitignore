@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains API keys)
+.env
+.env.local
+
+# build outputs
+dist/
+dist-electron/
+
+# examples
+book-example/
+
+# AI
+.serena
+.claude
+
+# Piper TTS resources (large model files)
+piper_resources/
+tts_resources
+
