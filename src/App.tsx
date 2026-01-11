@@ -98,7 +98,10 @@ function App() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [previewText, setPreviewText] = useState('Привет! Это пример звучания голоса.')
+  const getDefaultPreviewText = (lang: string) => {
+    return lang.startsWith('en') ? 'Hello! This is an example of how the voice sounds.' : 'Привет! Это пример звучания голоса.'
+  }
+  const [previewText, setPreviewText] = useState(() => getDefaultPreviewText(navigator.language.startsWith('en') ? 'en' : 'ru-RU'))
   const [isEditingPreview, setIsEditingPreview] = useState(false)
   const [tempPreviewText, setTempPreviewText] = useState('')
   const [isPreviewing, setIsPreviewing] = useState(false)
@@ -182,6 +185,11 @@ function App() {
 
     loadVoices()
   }, [language, selectedProvider])
+
+  // Update preview text when language changes
+  useEffect(() => {
+    setPreviewText(getDefaultPreviewText(language))
+  }, [language])
 
   // Listen for conversion progress
   useEffect(() => {
@@ -397,68 +405,55 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-2xl mx-auto space-y-6">
+    <div className="min-h-screen bg-background p-4">
+      <div className="max-w-4xl mx-auto space-y-4">
         {/* Header */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <FileAudio className="h-10 w-10 text-primary" />
-              <h1 className="text-3xl font-bold">Book to MP3</h1>
-            </div>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={toggleTheme}
-              aria-label="Toggle theme"
-              className="rounded-full"
-            >
-              {getThemeIcon()}
-            </Button>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileAudio className="h-6 w-6 text-primary" />
+            <h1 className="text-xl font-bold">Book to MP3</h1>
+            <span className="text-xs text-muted-foreground hidden sm:inline">- Convert books to audio</span>
           </div>
-          <p className="text-muted-foreground text-left">
-            Convert your books to audio files with multiple TTS providers
-          </p>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            className="h-8 w-8"
+          >
+            {getThemeIcon()}
+          </Button>
         </div>
 
         {/* File Drop Zone */}
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="py-4">
             {!file ? (
               <div
-                className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer
+                className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer
                   ${isDragging ? 'border-primary bg-accent' : 'border-muted-foreground/25 hover:border-primary/50'}`}
                 onClick={handleFileSelect}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
               >
-                <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-lg font-medium mb-2">
-                  Drop your book here
-                </p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  or click to browse
+                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-base font-medium mb-1">
+                  Drop your book here or click to browse
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Supports FB2, EPUB, TXT
                 </p>
               </div>
             ) : (
-              <div className="flex items-start gap-4">
-                <div className="flex-shrink-0">
-                  <Book className="h-12 w-12 text-primary" />
-                </div>
+              <div className="flex items-center gap-3">
+                <Book className="h-8 w-8 text-primary flex-shrink-0" />
                 <div className="flex-grow min-w-0">
-                  <h3 className="font-semibold truncate">
+                  <h3 className="font-medium text-sm truncate">
                     {bookContent?.title || file.name}
+                    {bookContent?.author && <span className="text-muted-foreground font-normal"> — {bookContent.author}</span>}
                   </h3>
-                  {bookContent?.author && (
-                    <p className="text-sm text-muted-foreground">
-                      {bookContent.author}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="uppercase">{file.extension}</span>
                     <span>•</span>
                     <span>{formatFileSize(file.size)}</span>
@@ -473,6 +468,7 @@ function App() {
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-8 w-8"
                   onClick={clearFile}
                   disabled={isConverting}
                 >
@@ -486,185 +482,159 @@ function App() {
         {/* Settings */}
         {file && bookContent && (
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Languages className="h-5 w-5" />
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Languages className="h-4 w-4" />
                 Settings
               </CardTitle>
-              <CardDescription>
-                Choose language, TTS provider and voice for audio
-              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Language Selection */}
-              <div className="space-y-2">
-                <Label>Book Language</Label>
-                <Select value={language} onValueChange={setLanguage} disabled={isConverting}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LANGUAGES.map(lang => (
-                      <SelectItem key={lang.code} value={lang.code}>
-                        {lang.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Provider Selection */}
-              <div className="space-y-2">
-                <Label>TTS Provider</Label>
-                <div className="grid grid-cols-1 gap-2">
-                  <RadioGroup value={selectedProvider} onValueChange={setSelectedProvider} disabled={isConverting}>
-                    {PROVIDERS.map(provider => {
-                      const isAvailable = getProviderAvailability(provider.id)
-                      return (
-                        <div
-                          key={provider.id}
-                          className={`flex items-center space-x-2 border rounded-lg p-3 ${
-                            isAvailable ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
-                          }`}
-                        >
-                          <RadioGroupItem
-                            value={provider.id}
-                            id={`provider-${provider.id}`}
-                            disabled={!isAvailable || isConverting}
-                          />
-                          <Label
-                            htmlFor={`provider-${provider.id}`}
-                            className={`flex-1 ${isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-                          >
-                            <div className="flex items-center gap-2">
-                              {provider.icon}
-                              <span className="font-medium">{provider.name}</span>
-                              {!isAvailable && <span className="text-xs text-muted-foreground">(не доступен)</span>}
-                            </div>
-                            <p className="text-xs text-muted-foreground">{provider.description}</p>
-                          </Label>
-                        </div>
-                      )
-                    })}
-                  </RadioGroup>
-                </div>
-              </div>
-
-              {/* Voice Selection */}
-              <div className="space-y-3">
-                <Label>Voice</Label>
-                <div className="flex gap-2">
-                  <Select value={selectedVoice} onValueChange={setSelectedVoice} disabled={isConverting}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Select voice" />
+            <CardContent className="space-y-4">
+              {/* Language & Provider Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Language Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Language</Label>
+                  <Select value={language} onValueChange={setLanguage} disabled={isConverting}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select language" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredVoices.map(voice => (
-                        <SelectItem key={voice.shortName} value={voice.shortName}>
-                          {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                      {LANGUAGES.map(lang => (
+                        <SelectItem key={lang.code} value={lang.code}>
+                          {lang.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handlePreviewVoice}
-                    disabled={!selectedVoice || isConverting || isPreviewing}
-                    title="Preview voice"
-                  >
-                    {isPreviewing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="h-4 w-4" />
-                    )}
-                  </Button>
                 </div>
 
-                {/* Preview Text */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs text-muted-foreground">Preview text</Label>
-                    {!isEditingPreview ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={startEditingPreview}
-                        className="h-6 px-2 text-xs"
-                        disabled={isConverting || isPreviewing}
-                      >
-                        <Pencil className="h-3 w-3 mr-1" />
-                        Edit
-                      </Button>
-                    ) : (
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={savePreviewText}
-                          className="h-6 px-2 text-xs"
+                {/* Provider Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-sm">TTS Provider</Label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {PROVIDERS.map(provider => {
+                      const isAvailable = getProviderAvailability(provider.id)
+                      const isSelected = selectedProvider === provider.id
+                      return (
+                        <button
+                          key={provider.id}
+                          onClick={() => isAvailable && !isConverting && setSelectedProvider(provider.id)}
+                          disabled={!isAvailable || isConverting}
+                          title={provider.description}
+                          className={`flex flex-col items-center gap-0.5 border rounded-md p-1.5 transition-colors ${
+                            isSelected ? 'border-primary bg-accent' : 'border-border'
+                          } ${
+                            isAvailable && !isConverting ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
+                          }`}
                         >
-                          <Check className="h-3 w-3 mr-1" />
-                          Save
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={cancelEditingPreview}
-                          className="h-6 px-2 text-xs"
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    )}
+                          {provider.icon}
+                          <span className="text-[10px] font-medium leading-none">{provider.name}</span>
+                        </button>
+                      )
+                    })}
                   </div>
-                  {isEditingPreview ? (
-                    <textarea
-                      value={tempPreviewText}
-                      onChange={(e) => setTempPreviewText(e.target.value)}
-                      className="w-full p-2 text-sm border rounded-md bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-                      rows={2}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          savePreviewText()
-                        }
-                        if (e.key === 'Escape') {
-                          cancelEditingPreview()
-                        }
-                      }}
-                    />
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic truncate">
-                      "{previewText}"
-                    </p>
-                  )}
                 </div>
               </div>
 
-              {/* Speed Control */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Reading Speed</Label>
-                  <span className="text-sm text-muted-foreground">
-                    {speed[0].toFixed(1)}x
-                  </span>
+              {/* Voice & Speed Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Voice Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Voice</Label>
+                  <div className="flex gap-1.5">
+                    <Select value={selectedVoice} onValueChange={setSelectedVoice} disabled={isConverting}>
+                      <SelectTrigger className="flex-1 h-9">
+                        <SelectValue placeholder="Select voice" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredVoices.map(voice => (
+                          <SelectItem key={voice.shortName} value={voice.shortName}>
+                            {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9"
+                      onClick={handlePreviewVoice}
+                      disabled={!selectedVoice || isConverting || isPreviewing}
+                      title="Preview voice"
+                    >
+                      {isPreviewing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
-                <Slider
-                  value={speed}
-                  onValueChange={setSpeed}
-                  min={0.5}
-                  max={2.0}
-                  step={0.1}
-                  disabled={isConverting}
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>0.5x</span>
-                  <span>1.0x</span>
-                  <span>2.0x</span>
+
+                {/* Speed Control */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">Speed</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {speed[0].toFixed(1)}x
+                    </span>
+                  </div>
+                  <Slider
+                    value={speed}
+                    onValueChange={setSpeed}
+                    min={0.5}
+                    max={2.0}
+                    step={0.1}
+                    disabled={isConverting}
+                    className="py-2"
+                  />
                 </div>
               </div>
+
+              {/* Preview Text - collapsed */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="italic truncate flex-1">Preview: "{previewText}"</span>
+                {!isEditingPreview ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={startEditingPreview}
+                    className="h-5 px-1.5 text-xs"
+                    disabled={isConverting || isPreviewing}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                ) : null}
+              </div>
+              {isEditingPreview && (
+                <div className="space-y-1.5">
+                  <textarea
+                    value={tempPreviewText}
+                    onChange={(e) => setTempPreviewText(e.target.value)}
+                    className="w-full p-2 text-sm border rounded-md bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                    rows={2}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        savePreviewText()
+                      }
+                      if (e.key === 'Escape') {
+                        cancelEditingPreview()
+                      }
+                    }}
+                  />
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={cancelEditingPreview} className="h-6 px-2 text-xs">
+                      Cancel
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={savePreviewText} className="h-6 px-2 text-xs">
+                      <Check className="h-3 w-3 mr-1" />
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -672,16 +642,16 @@ function App() {
         {/* Progress */}
         {isConverting && (
           <Card>
-            <CardContent className="pt-6 space-y-4">
+            <CardContent className="py-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Volume2 className="h-5 w-5 text-primary animate-pulse" />
-                  <span className="font-medium">Converting...</span>
+                  <Volume2 className="h-4 w-4 text-primary animate-pulse" />
+                  <span className="text-sm font-medium">Converting...</span>
                 </div>
-                <span className="text-sm text-muted-foreground">{progress}%</span>
+                <span className="text-xs text-muted-foreground">{progress}%</span>
               </div>
-              <Progress value={progress} />
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <Progress value={progress} className="h-2" />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{status.split(' | ')[1] || status}</span>
                 {status.includes(' | ') && <span>{status.split(' | ')[0]}</span>}
               </div>
@@ -692,8 +662,8 @@ function App() {
         {/* Error */}
         {error && (
           <Card className="border-destructive">
-            <CardContent className="pt-6">
-              <p className="text-destructive text-center">{error}</p>
+            <CardContent className="py-3">
+              <p className="text-destructive text-center text-sm">{error}</p>
             </CardContent>
           </Card>
         )}
@@ -703,22 +673,20 @@ function App() {
           <div className="flex justify-center gap-4">
             {!isConverting ? (
               <Button
-                size="lg"
                 onClick={handleConvert}
                 disabled={!selectedVoice}
                 className="gap-2"
               >
-                <Play className="h-5 w-5" />
+                <Play className="h-4 w-4" />
                 Convert to MP3
               </Button>
             ) : (
               <Button
-                size="lg"
                 variant="destructive"
                 onClick={handleCancel}
                 className="gap-2"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4" />
                 Cancel
               </Button>
             )}
@@ -728,9 +696,9 @@ function App() {
         {/* Success Message */}
         {!isConverting && status === 'Conversion complete!' && (
           <Card className="border-primary">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-center gap-2 text-primary">
-                <Download className="h-5 w-5" />
+            <CardContent className="py-3">
+              <div className="flex items-center justify-center gap-2 text-primary text-sm">
+                <Download className="h-4 w-4" />
                 <span className="font-medium">Audio file saved successfully!</span>
               </div>
             </CardContent>

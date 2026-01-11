@@ -5,18 +5,29 @@ node_modules/
 .env
 .env.local
 
-# build outputs
+# Build outputs
 dist/
 dist-electron/
+release/
 
-# examples
+# Examples
 book-example/
 
 # AI
 .serena
 .claude
 
-# Piper TTS resources (large model files)
+# TTS resources (large binary files - downloaded during build)
 piper_resources/
-tts_resources
+tts_resources/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
 

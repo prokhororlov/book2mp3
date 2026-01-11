@@ -11,6 +11,10 @@
     "build:vite": "vite build",
     "build:electron": "tsc -p electron/tsconfig.json",
     "package": "npm run build && electron-builder",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux",
     "preview": "vite preview",
     "setup": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-all.ps1",
     "setup:silero": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-silero.ps1"
@@ -60,22 +64,48 @@
     ],
     "extraResources": [
       {
-        "from": "tts_resources",
-        "to": "tts_resources",
+        "from": "tts_resources/piper",
+        "to": "tts_resources/piper",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "tts_resources/ffmpeg",
+        "to": "tts_resources/ffmpeg",
         "filter": [
           "**/*"
         ]
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "artifactName": "${productName}-${version}-macOS.${ext}"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "artifactName": "${productName}-${version}-Linux.${ext}"
     },
-    "asar": true
+    "asar": true,
+    "compression": "normal",
+    "removePackageScripts": true
   }
 }
