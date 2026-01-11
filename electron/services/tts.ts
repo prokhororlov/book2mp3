@@ -182,20 +182,13 @@ export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; 
     { id: 'elevenlabs', name: 'ElevenLabs', description: 'Cloud API (premium quality, requires API key)' }
   ]
 
-  // Silero requires Python environment, only available in dev mode
-  if (!app.isPackaged) {
-    providers.splice(2, 0, { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, slow)' })
-  }
+  // Silero requires Python environment setup
+  providers.splice(2, 0, { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, slow)' })
 
   return providers
 }
 
 export function isProviderAvailableForLanguage(provider: TTSProvider, language: string): boolean {
-  // Silero requires Python environment, only available in dev mode
-  if (provider === 'silero' && app.isPackaged) {
-    return false
-  }
-
   switch (provider) {
     case 'rhvoice':
       return RHVOICE_VOICES[language] !== undefined

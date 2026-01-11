@@ -68,13 +68,7 @@
     "win": {
       "target": [
         {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
