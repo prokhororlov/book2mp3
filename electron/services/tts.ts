@@ -608,7 +608,10 @@ export async function convertToSpeech(
     throw new Error(`Voice not found: ${voiceShortName}`)
   }
 
-  const chunks = splitIntoChunks(text, 1000)
+  // Silero has a token limit (~5000) in the positional encoder.
+  // Cyrillic/non-Latin text expands to more tokens, so use smaller chunks.
+  const maxChunkLength = voiceInfo.provider === 'silero' ? 500 : 1000
+  const chunks = splitIntoChunks(text, maxChunkLength)
 
   if (chunks.length === 0) {
     throw new Error('No text content to convert')
