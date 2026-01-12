@@ -243,7 +243,7 @@ function App() {
     }
 
     loadVoices()
-  }, [language, selectedProvider])
+  }, [language, selectedProvider, needsSetup])
 
   // Update preview text when language changes
   useEffect(() => {

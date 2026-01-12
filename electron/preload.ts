@@ -109,10 +109,11 @@ const electronAPI = {
     installFfmpeg?: boolean
     installRussianVoices?: boolean
     installEnglishVoices?: boolean
+    installSilero?: boolean
   }): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('run-setup', options),
 
-  getEstimatedDownloadSize: (): Promise<number> =>
+  getEstimatedDownloadSize: (): Promise<{ size: number; includeSilero: boolean }> =>
     ipcRenderer.invoke('get-estimated-download-size'),
 
   // ElevenLabs API key management

@@ -109,8 +109,10 @@ const SILERO_VOICES: Record<string, VoiceInfo[]> = {
     { name: 'Silero Eugene', shortName: 'silero-eugene', gender: 'Male', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/eugene' }
   ],
   'en': [
-    { name: 'Silero LJ', shortName: 'silero-lj', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/lj' },
-    { name: 'Silero VCTK', shortName: 'silero-vctk', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/vctk' }
+    { name: 'Silero Female 1', shortName: 'silero-en-f1', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_0' },
+    { name: 'Silero Female 2', shortName: 'silero-en-f2', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_1' },
+    { name: 'Silero Male 1', shortName: 'silero-en-m1', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_2' },
+    { name: 'Silero Male 2', shortName: 'silero-en-m2', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_3' }
   ]
 }
 
@@ -423,10 +425,13 @@ async function generateSpeechWithSilero(
   }
 
   return new Promise<void>((resolve, reject) => {
+    // Extract speaker name from path (e.g., 'v3_1_ru/xenia' -> 'xenia')
+    const speaker = speakerPath.includes('/') ? speakerPath.split('/').pop()! : speakerPath
+
     const args = [
       sileroScript,
       '--text', text,
-      '--speaker', speakerPath,
+      '--speaker', speaker,
       '--output', outputPath
     ]
 

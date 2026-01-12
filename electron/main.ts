@@ -37,6 +37,13 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // Allow opening DevTools with F12 in production for debugging
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12') {
+      mainWindow?.webContents.toggleDevTools()
+    }
+  })
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
   })
@@ -202,7 +209,9 @@ ipcMain.handle('check-dependencies', async () => {
 })
 
 ipcMain.handle('check-dependencies-async', async () => {
-  return checkDependenciesAsync()
+  const result = await checkDependenciesAsync()
+  console.log('checkDependenciesAsync result:', JSON.stringify(result, null, 2))
+  return result
 })
 
 ipcMain.handle('check-python-available', async () => {
@@ -226,7 +235,7 @@ ipcMain.handle('needs-setup', async () => {
 })
 
 ipcMain.handle('get-estimated-download-size', async () => {
-  return getEstimatedDownloadSize()
+  return await getEstimatedDownloadSize()
 })
 
 // Settings file path

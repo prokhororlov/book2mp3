@@ -19,14 +19,16 @@ export function SetupScreen({ onSetupComplete }: SetupScreenProps) {
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [estimatedSize, setEstimatedSize] = useState<number>(0)
+  const [includeSilero, setIncludeSilero] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
 
   useEffect(() => {
     // Get estimated download size
     const loadSize = async () => {
       if (window.electronAPI) {
-        const size = await window.electronAPI.getEstimatedDownloadSize()
-        setEstimatedSize(size)
+        const result = await window.electronAPI.getEstimatedDownloadSize()
+        setEstimatedSize(result.size)
+        setIncludeSilero(result.includeSilero)
       }
     }
     loadSize()
@@ -54,7 +56,8 @@ export function SetupScreen({ onSetupComplete }: SetupScreenProps) {
       installPiper: true,
       installFfmpeg: true,
       installRussianVoices: true,
-      installEnglishVoices: true
+      installEnglishVoices: true,
+      installSilero: includeSilero
     })
 
     if (!result.success) {
@@ -71,6 +74,8 @@ export function SetupScreen({ onSetupComplete }: SetupScreenProps) {
         return 'FFmpeg'
       case 'voice':
         return 'Voice Model'
+      case 'silero':
+        return 'Silero TTS'
       case 'complete':
         return 'Complete'
       default:
@@ -124,7 +129,13 @@ export function SetupScreen({ onSetupComplete }: SetupScreenProps) {
                   <li>FFmpeg audio converter</li>
                   <li>Russian voice models (4)</li>
                   <li>English voice models (3)</li>
+                  {includeSilero && <li>Silero TTS + PyTorch (best quality)</li>}
                 </ul>
+                {!includeSilero && (
+                  <p className="text-xs text-muted-foreground/70 mt-2">
+                    Note: Silero TTS (best quality) requires Python 3.9+ to be installed.
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center justify-between text-sm">

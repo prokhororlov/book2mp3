@@ -53,11 +53,12 @@ export async function checkPythonAvailable(): Promise<string | null> {
 
   for (const cmd of pythonCommands) {
     try {
-      const { stdout } = await execAsync(`${cmd} --version`, { timeout: 5000 })
-      if (stdout.includes('Python 3')) {
+      const { stdout, stderr } = await execAsync(`${cmd} --version`, { timeout: 5000 })
+      const output = stdout + stderr
+      if (output.includes('Python 3')) {
         return cmd
       }
-    } catch {
+    } catch (error) {
       continue
     }
   }
@@ -70,7 +71,11 @@ export function checkSileroInstalled(): boolean {
   const venvPython = path.join(sileroPath, 'venv', 'Scripts', 'python.exe')
   const generateScript = path.join(sileroPath, 'generate.py')
 
-  return existsSync(venvPython) && existsSync(generateScript)
+  const pythonExists = existsSync(venvPython)
+  const scriptExists = existsSync(generateScript)
+  console.log('Silero check:', { sileroPath, venvPython, generateScript, pythonExists, scriptExists })
+
+  return pythonExists && scriptExists
 }
 
 // Check which dependencies are installed
@@ -139,6 +144,7 @@ export async function checkDependenciesAsync(): Promise<DependencyStatus> {
   const status = checkDependencies()
   const pythonCmd = await checkPythonAvailable()
   status.sileroAvailable = pythonCmd !== null
+  console.log('checkDependenciesAsync result:', { ...status, pythonCmd })
   return status
 }
 
@@ -377,13 +383,15 @@ export async function runSetup(
     installFfmpeg?: boolean
     installRussianVoices?: boolean
     installEnglishVoices?: boolean
+    installSilero?: boolean
   } = {}
 ): Promise<void> {
   const {
     installPiper: shouldInstallPiper = true,
     installFfmpeg: shouldInstallFfmpeg = true,
     installRussianVoices = true,
-    installEnglishVoices = true
+    installEnglishVoices = true,
+    installSilero: shouldInstallSilero = true
   } = options
 
   const status = checkDependencies()
@@ -429,6 +437,20 @@ export async function runSetup(
     }
   }
 
+  // Install Silero if Python is available and not already installed
+  if (shouldInstallSilero && !status.silero) {
+    const pythonCmd = await checkPythonAvailable()
+    if (pythonCmd) {
+      const result = await installSilero(onProgress)
+      if (!result.success) {
+        console.warn('Silero installation failed:', result.error)
+        // Don't fail the whole setup, Silero is optional
+      }
+    } else {
+      console.log('Skipping Silero installation: Python not available')
+    }
+  }
+
   onProgress({
     stage: 'complete',
     progress: 100,
@@ -437,7 +459,7 @@ export async function runSetup(
 }
 
 // Get total download size estimate
-export function getEstimatedDownloadSize(): number {
+export async function getEstimatedDownloadSize(): Promise<{ size: number; includeSilero: boolean }> {
   const status = checkDependencies()
   let size = 0
 
@@ -456,7 +478,16 @@ export function getEstimatedDownloadSize(): number {
   const missingEnVoices = 3 - status.piperVoices.enUS.length
   size += (missingRuVoices + missingEnVoices) * 20
 
-  return size
+  // Check if Python is available for Silero
+  const pythonCmd = await checkPythonAvailable()
+  const includeSilero = pythonCmd !== null && !status.silero
+
+  // Silero (PyTorch + deps) ~500MB
+  if (includeSilero) {
+    size += 500
+  }
+
+  return { size, includeSilero }
 }
 
 // Install Silero TTS (requires Python to be installed on system)
@@ -526,7 +557,7 @@ export async function installSilero(
       details: 'Installing additional dependencies...'
     })
 
-    await execAsync(`"${venvPython}" -m pip install omegaconf --no-input`, {
+    await execAsync(`"${venvPython}" -m pip install omegaconf numpy --no-input`, {
       timeout: 120000,
       maxBuffer: 1024 * 1024 * 10
     })
@@ -585,8 +616,8 @@ def main():
 
     # Determine language from speaker
     ru_speakers = ['xenia', 'baya', 'kseniya', 'aidar', 'eugene', 'random']
-    en_speakers = ['en_0', 'en_1', 'en_2', 'en_3', 'en_4']
 
+    # English speakers are en_0 through en_117 and 'random'
     if args.speaker in ru_speakers:
         model, _ = torch.hub.load(
             repo_or_dir='snakers4/silero-models',
