@@ -4,7 +4,7 @@ import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
 import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders } from './services/tts'
-import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, checkPythonAvailable } from './services/setup'
+import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg } from './services/setup'
 
 // Load environment variables from .env file
 config()
@@ -228,6 +228,84 @@ ipcMain.handle('install-silero', async (event) => {
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
+})
+
+ipcMain.handle('install-coqui', async (event) => {
+  try {
+    const result = await installCoqui((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('install-piper', async (event) => {
+  try {
+    const result = await installPiper((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('install-ffmpeg', async (event) => {
+  try {
+    const result = await installFfmpeg((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('install-piper-voice', async (event, lang: 'ru_RU' | 'en_US', voiceName: string, quality: string) => {
+  try {
+    await installPiperVoice(lang, voiceName, quality, (progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('install-rhvoice-core', async (event) => {
+  try {
+    const result = await installRHVoiceCore((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('install-rhvoice', async (event, voiceName: string, language: string) => {
+  try {
+    const result = await installRHVoice(voiceName, language, (progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('get-installed-rhvoices', async () => {
+  return await getInstalledRHVoices()
+})
+
+ipcMain.handle('get-available-rhvoices', (_event, language: string) => {
+  return getAvailableRHVoices(language)
+})
+
+ipcMain.handle('get-rhvoice-urls', () => {
+  return RHVOICE_VOICE_URLS
 })
 
 ipcMain.handle('needs-setup', async () => {

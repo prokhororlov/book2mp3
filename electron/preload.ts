@@ -22,9 +22,10 @@ export interface VoiceInfo {
   shortName: string
   gender: 'Male' | 'Female'
   locale: string
-  provider: 'rhvoice' | 'piper' | 'silero' | 'elevenlabs'
+  provider: 'system' | 'piper' | 'silero' | 'elevenlabs' | 'coqui'
   modelPath?: string
   voiceId?: string
+  isInstalled?: boolean
 }
 
 export interface ConversionProgress {
@@ -43,9 +44,27 @@ export interface DependencyStatus {
   ffmpeg: boolean
   silero: boolean
   sileroAvailable: boolean
+  coqui: boolean
+  coquiAvailable: boolean
+  rhvoiceCore: boolean
+  rhvoiceVoices: string[]
   piperVoices: {
     ruRU: string[]
     enUS: string[]
+  }
+}
+
+export interface RHVoiceInfo {
+  name: string
+  gender: 'Male' | 'Female'
+}
+
+export interface RHVoiceUrls {
+  [language: string]: {
+    [voiceName: string]: {
+      url: string
+      gender: 'Male' | 'Female'
+    }
   }
 }
 
@@ -100,6 +119,34 @@ const electronAPI = {
 
   installSilero: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('install-silero'),
+
+  installCoqui: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-coqui'),
+
+  installPiper: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-piper'),
+
+  installFfmpeg: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-ffmpeg'),
+
+  installPiperVoice: (lang: 'ru_RU' | 'en_US', voiceName: string, quality: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-piper-voice', lang, voiceName, quality),
+
+  // RHVoice management
+  installRHVoiceCore: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-rhvoice-core'),
+
+  installRHVoice: (voiceName: string, language: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-rhvoice', voiceName, language),
+
+  getInstalledRHVoices: (): Promise<string[]> =>
+    ipcRenderer.invoke('get-installed-rhvoices'),
+
+  getAvailableRHVoices: (language: string): Promise<RHVoiceInfo[]> =>
+    ipcRenderer.invoke('get-available-rhvoices', language),
+
+  getRHVoiceUrls: (): Promise<RHVoiceUrls> =>
+    ipcRenderer.invoke('get-rhvoice-urls'),
 
   needsSetup: (): Promise<boolean> =>
     ipcRenderer.invoke('needs-setup'),

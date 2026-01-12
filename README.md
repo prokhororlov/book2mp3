@@ -6,7 +6,7 @@ Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech 
 
 ## Features
 
-- **Four TTS providers** - RHVoice, Piper, Silero and ElevenLabs
+- **Five TTS providers** - System (Windows SAPI), Piper, Silero, ElevenLabs and Coqui
 - **Multiple voices** - 20+ voices in Russian and English
 - **Format support** - FB2, EPUB, TXT
 - **Speed control** - from 0.5x to 2.0x
@@ -15,22 +15,15 @@ Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech 
 
 ## TTS Providers
 
-### 1. RHVoice (Windows SAPI)
-**Speed: Fast | Quality: Medium**
+### 1. System (Windows SAPI)
+**Speed: Fast | Quality: Varies**
 
-Uses Windows SAPI for speech generation. Fastest option.
+Uses any Windows SAPI voices installed on your system. The app automatically detects all available Russian and English voices.
 
-#### Russian voices:
-- **Aleksandr** (Male) - [Download](https://github.com/RHVoice/aleksandr-rus/releases)
-- **Irina** (Female) - [Download](https://github.com/RHVoice/irina-rus/releases)
-- **Anna** (Female) - [Download](https://github.com/RHVoice/anna-rus/releases)
-- **Elena** (Female) - [Download](https://github.com/RHVoice/elena-rus/releases)
-
-#### English voices:
-- **Bdl** (Male) - [Download](https://github.com/RHVoice/bdl-eng/releases)
-- **Slt** (Female) - [Download](https://github.com/RHVoice/slt-eng/releases)
-- **Clb** (Female) - [Download](https://github.com/RHVoice/clb-eng/releases)
-- **Alan** (Male) - [Download](https://github.com/RHVoice/alan-eng/releases)
+#### Installing additional voices:
+- **RHVoice** - [Download voices](https://github.com/RHVoice/RHVoice/releases)
+- **Microsoft voices** - Available in Windows Settings → Time & Language → Speech
+- Any other SAPI-compatible voices
 
 ### 2. Piper (ONNX models)
 **Speed: Medium | Quality: Good**
@@ -84,7 +77,7 @@ ELEVENLABS_API_KEY=your_api_key_here
 ### Prerequisites
 
 - Node.js 18+
-- Windows 10/11 (for RHVoice via SAPI)
+- Windows 10/11 (for System SAPI voices)
 - Python 3.9+ (for Silero, optional)
 
 ### Quick Start
@@ -142,8 +135,8 @@ tts_resources/
             en_US-lessac-medium.onnx.json
 ```
 
-#### For RHVoice:
-Install voices via their installers (links above). After installation they will be available via Windows SAPI.
+#### For System SAPI:
+Install any SAPI-compatible voices (RHVoice, Microsoft, etc.). After installation they will be automatically detected by the app.
 
 #### For Silero:
 Models download automatically on first use (~100-200 MB).
@@ -199,14 +192,15 @@ book-to-mp3/
 
 | Provider    | Speed    | Quality    | Model Size   | Type  | Recommendation          |
 |-------------|----------|------------|--------------|-------|-------------------------|
-| RHVoice     | Fast     | Medium     | ~10 MB       | CPU   | For quick processing    |
+| System      | Fast     | Varies     | N/A          | CPU   | For quick processing    |
 | Piper       | Medium   | Good       | ~50 MB       | CPU   | Balanced option         |
 | Silero      | Slow     | Best       | ~100-200 MB  | CPU   | Best offline quality    |
 | ElevenLabs  | Fast     | Premium    | Cloud        | API   | Best overall quality    |
+| Coqui       | Slow     | Excellent  | ~2 GB        | CPU   | Voice cloning support   |
 
 ### Parallelization
 
-- **RHVoice**: up to 30 parallel threads
+- **System**: up to 30 parallel threads
 - **Piper**: up to 10 parallel threads
 - **Silero**: up to 5 parallel threads
 - **ElevenLabs**: up to 3 parallel requests
@@ -218,10 +212,10 @@ book-to-mp3/
 - Check directory structure
 - `.onnx` and `.onnx.json` files must be in same folder
 
-### RHVoice not showing
-- Install voices via installers
+### System voices not showing
+- Install SAPI-compatible voices (RHVoice, Microsoft, etc.)
 - Restart application after installation
-- Check that voices are visible in Windows SAPI (Control Panel → Speech)
+- Check that voices are visible in Windows Settings → Time & Language → Speech
 
 ### Silero slow generation
 - Normal - it uses PyTorch models
@@ -243,8 +237,9 @@ MIT
 
 ## Acknowledgements
 
-- [RHVoice](https://github.com/RHVoice) - Quality TTS voices
+- [RHVoice](https://github.com/RHVoice) - Quality SAPI voices
 - [Piper](https://github.com/rhasspy/piper) - Fast ONNX models
+- [Coqui TTS](https://github.com/coqui-ai/TTS) - XTTS-v2 voice cloning
 - [Silero](https://github.com/snakers4/silero-models) - Excellent PyTorch models
 - [ElevenLabs](https://elevenlabs.io/) - Premium cloud TTS
 - [FFmpeg](https://ffmpeg.org/) - Audio conversion

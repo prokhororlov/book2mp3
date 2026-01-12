@@ -3,7 +3,7 @@ import path from 'path'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { app } from 'electron'
-import { checkSileroInstalled } from './setup'
+import { checkSileroInstalled, getInstalledRHVoices } from './setup'
 
 const execAsync = promisify(exec)
 
@@ -17,6 +17,7 @@ export interface VoiceInfo {
   provider: TTSProvider
   modelPath?: string // For Piper and Silero
   voiceId?: string // For ElevenLabs
+  isInstalled?: boolean // For RHVoice and Piper
 }
 
 // RHVoice configurations (Windows SAPI)
@@ -39,7 +40,7 @@ const RHVOICE_VOICES: Record<string, VoiceInfo[]> = {
 const PIPER_VOICES: Record<string, VoiceInfo[]> = {
   'ru-RU': [
     {
-      name: 'Piper Denis',
+      name: 'Denis',
       shortName: 'piper-denis',
       gender: 'Male',
       locale: 'ru-RU',
@@ -47,7 +48,7 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
       modelPath: 'ru_RU/denis/medium/ru_RU-denis-medium.onnx'
     },
     {
-      name: 'Piper Dmitri',
+      name: 'Dmitri',
       shortName: 'piper-dmitri',
       gender: 'Male',
       locale: 'ru-RU',
@@ -55,7 +56,7 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
       modelPath: 'ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx'
     },
     {
-      name: 'Piper Irina',
+      name: 'Irina',
       shortName: 'piper-irina',
       gender: 'Female',
       locale: 'ru-RU',
@@ -63,7 +64,7 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
       modelPath: 'ru_RU/irina/medium/ru_RU-irina-medium.onnx'
     },
     {
-      name: 'Piper Ruslan',
+      name: 'Ruslan',
       shortName: 'piper-ruslan',
       gender: 'Male',
       locale: 'ru-RU',
@@ -73,7 +74,7 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
   ],
   'en': [
     {
-      name: 'Piper Amy',
+      name: 'Amy',
       shortName: 'piper-amy',
       gender: 'Female',
       locale: 'en',
@@ -81,7 +82,7 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
       modelPath: 'en_US/amy/low/en_US-amy-low.onnx'
     },
     {
-      name: 'Piper Lessac',
+      name: 'Lessac',
       shortName: 'piper-lessac',
       gender: 'Male',
       locale: 'en',
@@ -89,7 +90,7 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
       modelPath: 'en_US/lessac/medium/en_US-lessac-medium.onnx'
     },
     {
-      name: 'Piper Ryan',
+      name: 'Ryan',
       shortName: 'piper-ryan',
       gender: 'Male',
       locale: 'en',
@@ -102,17 +103,17 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
 // Silero voice configurations
 const SILERO_VOICES: Record<string, VoiceInfo[]> = {
   'ru-RU': [
-    { name: 'Silero Aidar', shortName: 'silero-aidar', gender: 'Male', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/aidar' },
-    { name: 'Silero Baya', shortName: 'silero-baya', gender: 'Female', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/baya' },
-    { name: 'Silero Kseniya', shortName: 'silero-kseniya', gender: 'Female', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/kseniya' },
-    { name: 'Silero Xenia', shortName: 'silero-xenia', gender: 'Female', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/xenia' },
-    { name: 'Silero Eugene', shortName: 'silero-eugene', gender: 'Male', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/eugene' }
+    { name: 'Aidar', shortName: 'silero-aidar', gender: 'Male', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/aidar' },
+    { name: 'Baya', shortName: 'silero-baya', gender: 'Female', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/baya' },
+    { name: 'Kseniya', shortName: 'silero-kseniya', gender: 'Female', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/kseniya' },
+    { name: 'Xenia', shortName: 'silero-xenia', gender: 'Female', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/xenia' },
+    { name: 'Eugene', shortName: 'silero-eugene', gender: 'Male', locale: 'ru-RU', provider: 'silero', modelPath: 'v3_1_ru/eugene' }
   ],
   'en': [
-    { name: 'Silero Female 1', shortName: 'silero-en-f1', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_0' },
-    { name: 'Silero Female 2', shortName: 'silero-en-f2', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_1' },
-    { name: 'Silero Male 1', shortName: 'silero-en-m1', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_2' },
-    { name: 'Silero Male 2', shortName: 'silero-en-m2', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_3' }
+    { name: 'Female 1', shortName: 'silero-en-f1', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_0' },
+    { name: 'Female 2', shortName: 'silero-en-f2', gender: 'Female', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_1' },
+    { name: 'Male 1', shortName: 'silero-en-m1', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_2' },
+    { name: 'Male 2', shortName: 'silero-en-m2', gender: 'Male', locale: 'en', provider: 'silero', modelPath: 'v3_en/en_3' }
   ]
 }
 
@@ -144,15 +145,34 @@ export function getElevenLabsApiKey(): string | null {
   return elevenLabsApiKey
 }
 
+
+// Check if Piper voice model file exists
+function isPiperVoiceInstalled(modelPath: string): boolean {
+  const resourcesPath = getPiperResourcesPath()
+  const fullModelPath = path.join(resourcesPath, 'voices', modelPath)
+  return fs.existsSync(fullModelPath)
+}
+
 export async function getVoicesForLanguage(language: string, provider?: TTSProvider): Promise<VoiceInfo[]> {
   let allVoices: VoiceInfo[] = []
 
   if (!provider || provider === 'rhvoice') {
-    allVoices = allVoices.concat(RHVOICE_VOICES[language] || [])
+    // Get installed RHVoice voices from SAPI
+    const installedRHVoices = await getInstalledRHVoices()
+    const rhvoiceVoices = (RHVOICE_VOICES[language] || []).map(voice => ({
+      ...voice,
+      isInstalled: installedRHVoices.some(v => v.toLowerCase() === voice.shortName.toLowerCase())
+    }))
+    allVoices = allVoices.concat(rhvoiceVoices)
   }
 
   if (!provider || provider === 'piper') {
-    allVoices = allVoices.concat(PIPER_VOICES[language] || [])
+    // Check if each Piper voice model file exists
+    const piperVoices = (PIPER_VOICES[language] || []).map(voice => ({
+      ...voice,
+      isInstalled: voice.modelPath ? isPiperVoiceInstalled(voice.modelPath) : false
+    }))
+    allVoices = allVoices.concat(piperVoices)
   }
 
   // Silero requires Python environment to be set up
@@ -180,10 +200,30 @@ export function getSupportedLanguages(): Array<{ code: string; name: string }> {
 
 export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; description: string; requiresSetup?: boolean }> {
   const providers: Array<{ id: TTSProvider; name: string; description: string; requiresSetup?: boolean }> = [
-    { id: 'rhvoice', name: 'RHVoice', description: 'Windows SAPI (fastest)' },
-    { id: 'piper', name: 'Piper', description: 'ONNX models (medium quality)' },
-    { id: 'silero', name: 'Silero', description: 'PyTorch models (best quality, requires Python)', requiresSetup: true },
-    { id: 'elevenlabs', name: 'ElevenLabs', description: 'Cloud API (premium quality, requires API key)' }
+    {
+      id: 'rhvoice',
+      name: 'RHVoice',
+      description: 'Легковесный офлайн-движок на базе Windows SAPI. Минимальный размер установки, мгновенная генерация речи. Отлично подходит для быстрой озвучки больших текстов.',
+      requiresSetup: true
+    },
+    {
+      id: 'piper',
+      name: 'Piper',
+      description: 'Нейросетевой синтез на ONNX. Высокое качество звучания при быстрой генерации. Компактные голосовые модели, полностью офлайн работа.',
+      requiresSetup: true
+    },
+    {
+      id: 'silero',
+      name: 'Silero',
+      description: 'Продвинутый нейросетевой движок на PyTorch. Естественное и выразительное звучание, множество голосов. Работает офлайн, требует больше времени на генерацию.',
+      requiresSetup: true
+    },
+    {
+      id: 'elevenlabs',
+      name: 'ElevenLabs',
+      description: 'Премиум облачный сервис с передовыми технологиями синтеза. Превосходное качество, возможность клонирования голоса. Требует API-ключ и подключение к интернету.',
+      requiresSetup: false
+    }
   ]
 
   return providers

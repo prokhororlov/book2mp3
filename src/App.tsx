@@ -6,7 +6,7 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2 } from 'lucide-react'
 import { SetupScreen } from '@/components/SetupScreen'
 
 interface BookContent {
@@ -28,7 +28,8 @@ interface VoiceInfo {
   shortName: string
   gender: 'Male' | 'Female'
   locale: string
-  provider: 'rhvoice' | 'piper' | 'silero' | 'elevenlabs'
+  provider: 'system' | 'piper' | 'silero' | 'elevenlabs' | 'coqui' | 'rhvoice'
+  isInstalled?: boolean
 }
 
 interface ProviderInfo {
@@ -56,10 +57,12 @@ const LANGUAGES = [
 
 // Provider icons mapping
 const PROVIDER_ICONS: Record<string, React.ReactNode> = {
+  system: <Zap className="h-4 w-4" />,
   rhvoice: <Zap className="h-4 w-4" />,
   piper: <Cpu className="h-4 w-4" />,
   silero: <Sparkles className="h-4 w-4" />,
   elevenlabs: <Cloud className="h-4 w-4" />,
+  coqui: <Wand2 className="h-4 w-4" />,
 }
 
 function App() {
@@ -139,6 +142,32 @@ function App() {
   const [pythonAvailable, setPythonAvailable] = useState(false)
   const [isInstallingSilero, setIsInstallingSilero] = useState(false)
   const [sileroInstallProgress, setSileroInstallProgress] = useState('')
+  const [sileroInstallPercent, setSileroInstallPercent] = useState(0)
+
+  // Coqui state
+  const [coquiInstalled, setCoquiInstalled] = useState(false)
+  const [isInstallingCoqui, setIsInstallingCoqui] = useState(false)
+  const [coquiInstallProgress, setCoquiInstallProgress] = useState('')
+
+  // Piper voice installation state
+  const [installingVoice, setInstallingVoice] = useState<string | null>(null)
+  const [voiceInstallProgress, setVoiceInstallProgress] = useState('')
+  const [voiceSelectOpen, setVoiceSelectOpen] = useState(false)
+
+  // RHVoice state
+  const [installingRHVoice, setInstallingRHVoice] = useState<string | null>(null)
+  const [rhvoiceInstallProgress, setRHVoiceInstallProgress] = useState<number>(0)
+  const [rhvoiceCoreInstalled, setRhvoiceCoreInstalled] = useState(false)
+  const [isInstallingRHVoiceCore, setIsInstallingRHVoiceCore] = useState(false)
+  const [rhvoiceCoreInstallProgress, setRhvoiceCoreInstallProgress] = useState('')
+  const [rhvoiceCoreInstallPercent, setRhvoiceCoreInstallPercent] = useState(0)
+
+  // Piper state
+  const [piperInstalled, setPiperInstalled] = useState(false)
+  const [ffmpegInstalled, setFfmpegInstalled] = useState(false)
+  const [isInstallingPiperCore, setIsInstallingPiperCore] = useState(false)
+  const [piperCoreInstallProgress, setPiperCoreInstallProgress] = useState('')
+  const [piperCoreInstallPercent, setPiperCoreInstallPercent] = useState(0)
 
   // Load ElevenLabs API key and check Silero on mount
   useEffect(() => {
@@ -155,19 +184,23 @@ function App() {
       }
     }
 
-    const checkSilero = async () => {
+    const checkProviders = async () => {
       if (!window.electronAPI) return
       try {
         const deps = await window.electronAPI.checkDependenciesAsync()
         setSileroInstalled(deps.silero)
-        setPythonAvailable(deps.sileroAvailable)
+        setCoquiInstalled(deps.coqui)
+        setPythonAvailable(deps.sileroAvailable || deps.coquiAvailable)
+        setPiperInstalled(deps.piper)
+        setFfmpegInstalled(deps.ffmpeg)
+        setRhvoiceCoreInstalled(deps.rhvoiceCore)
       } catch (err) {
-        console.error('Failed to check Silero status:', err)
+        console.error('Failed to check provider status:', err)
       }
     }
 
     loadApiKey()
-    checkSilero()
+    checkProviders()
   }, [])
 
   // Get actual theme based on system preference
@@ -229,9 +262,21 @@ function App() {
         // Filter by provider
         const filteredVoices = loadedVoices.filter((v: VoiceInfo) => v.provider === selectedProvider)
 
-        // Default to first available voice in filtered list
-        if (filteredVoices.length > 0) {
+        // For Piper and RHVoice, only select installed voices
+        if (selectedProvider === 'piper' || selectedProvider === 'rhvoice') {
+          const installedVoices = filteredVoices.filter((v: VoiceInfo) => v.isInstalled !== false)
+          if (installedVoices.length > 0) {
+            setSelectedVoice(installedVoices[0].shortName)
+          } else {
+            setSelectedVoice('') // No installed voices
+          }
+        } else if (filteredVoices.length > 0) {
+          // Default to first available voice in filtered list
           setSelectedVoice(filteredVoices[0].shortName)
+        } else if (selectedProvider === 'silero' || selectedProvider === 'coqui') {
+          // Silero and Coqui may not have voices until dependencies are installed
+          // Don't reset provider, just clear voice selection
+          setSelectedVoice('')
         } else if (loadedVoices.length > 0) {
           // If no voices in selected provider, reset to all and select first
           setSelectedProvider('all')
@@ -243,7 +288,7 @@ function App() {
     }
 
     loadVoices()
-  }, [language, selectedProvider, needsSetup])
+  }, [language, selectedProvider, needsSetup, sileroInstalled, coquiInstalled])
 
   // Update preview text when language changes
   useEffect(() => {
@@ -458,10 +503,46 @@ function App() {
   // Filter voices by selected provider
   const filteredVoices = voices.filter(v => v.provider === selectedProvider)
 
+  // Check if Piper has any installed voices
+  const hasPiperInstalledVoices = filteredVoices.some(v => v.provider === 'piper' && v.isInstalled !== false)
+
   // Check which providers have voices for current language
   const getProviderAvailability = (providerId: string) => {
+    // Silero and Coqui should always be selectable (they show setup screen if not installed)
+    if (providerId === 'silero' || providerId === 'coqui') {
+      return true
+    }
     return voices.some(v => v.provider === providerId)
   }
+
+  // Check if RHVoice has any installed voices
+  const hasRHVoiceInstalledVoices = filteredVoices.some(v => v.provider === 'rhvoice' && v.isInstalled === true)
+
+  // Check if selected provider is ready to use (dependencies installed + voices available)
+  const isProviderReady = (() => {
+    switch (selectedProvider) {
+      case 'silero':
+        return sileroInstalled
+      case 'coqui':
+        return coquiInstalled
+      case 'elevenlabs':
+        return hasApiKey
+      case 'piper':
+        return piperInstalled
+      case 'rhvoice':
+        return rhvoiceCoreInstalled
+      default:
+        return true // system always available
+    }
+  })()
+
+  // Check if selected voice is valid (installed for Piper/RHVoice)
+  const isSelectedVoiceValid = (() => {
+    if (!selectedVoice) return false
+    if (selectedProvider !== 'piper' && selectedProvider !== 'rhvoice') return true
+    const voice = filteredVoices.find(v => v.shortName === selectedVoice)
+    return voice?.isInstalled !== false
+  })()
 
   // Show loading while checking setup status
   if (needsSetup === null) {
@@ -561,52 +642,37 @@ function App() {
                 Settings
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Language & Provider Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Language Selection */}
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Language</Label>
-                  <Select value={language} onValueChange={setLanguage} disabled={isConverting}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Select language" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {LANGUAGES.map(lang => (
-                        <SelectItem key={lang.code} value={lang.code}>
-                          {lang.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+            <CardContent className="space-y-4 pb-6">
+              {/* Provider Selection */}
+              <div className="space-y-3">
+                <Label className="text-sm">TTS Provider</Label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {availableProviders.map(provider => {
+                    const isAvailable = getProviderAvailability(provider.id)
+                    const isSelected = selectedProvider === provider.id
+                    return (
+                      <button
+                        key={provider.id}
+                        onClick={() => isAvailable && !isConverting && setSelectedProvider(provider.id)}
+                        disabled={!isAvailable || isConverting}
+                        className={`flex flex-col items-center gap-1 border rounded-lg p-3 transition-colors ${
+                          isSelected ? 'border-primary bg-accent' : 'border-border'
+                        } ${
+                          isAvailable && !isConverting ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {provider.icon}
+                        <span className="text-xs font-medium">{provider.name}</span>
+                      </button>
+                    )
+                  })}
                 </div>
-
-                {/* Provider Selection */}
-                <div className="space-y-1.5">
-                  <Label className="text-sm">TTS Provider</Label>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {availableProviders.map(provider => {
-                      const isAvailable = getProviderAvailability(provider.id)
-                      const isSelected = selectedProvider === provider.id
-                      return (
-                        <button
-                          key={provider.id}
-                          onClick={() => isAvailable && !isConverting && setSelectedProvider(provider.id)}
-                          disabled={!isAvailable || isConverting}
-                          title={provider.description}
-                          className={`flex flex-col items-center gap-0.5 border rounded-md p-1.5 transition-colors ${
-                            isSelected ? 'border-primary bg-accent' : 'border-border'
-                          } ${
-                            isAvailable && !isConverting ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
-                          }`}
-                        >
-                          {provider.icon}
-                          <span className="text-[10px] font-medium leading-none">{provider.name}</span>
-                        </button>
-                      )
-                    })}
+                {/* Provider Description */}
+                {selectedProvider && (
+                  <div className="text-xs text-muted-foreground bg-muted/30 p-2.5 rounded-md border border-border/50 leading-relaxed mt-1">
+                    {availableProviders.find(p => p.id === selectedProvider)?.description}
                   </div>
-                </div>
+                )}
               </div>
 
               {/* ElevenLabs API Key Input */}
@@ -697,7 +763,7 @@ function App() {
 
               {/* Silero Setup Notice */}
               {selectedProvider === 'silero' && !sileroInstalled && (
-                <div className="space-y-2 p-3 border rounded-md bg-muted/50">
+                <div className="space-y-3 p-4 border rounded-md bg-muted/50">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
                     <span className="font-medium text-sm">Silero Setup Required</span>
@@ -720,17 +786,46 @@ function App() {
                         {' '}and restart the application.
                       </p>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">
-                        Silero needs to download PyTorch and models (~500MB). This is a one-time setup.
-                      </p>
-                      {isInstallingSilero ? (
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm">{sileroInstallProgress || 'Installing...'}</span>
+                  ) : isInstallingSilero ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">{sileroInstallProgress || 'Installing...'}</span>
+                          <span className="font-medium">{sileroInstallPercent}%</span>
                         </div>
-                      ) : (
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300 ease-out"
+                            style={{ width: `${sileroInstallPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Please wait, this may take several minutes...
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <p>For Silero to work, the following will be installed:</p>
+                        <ul className="list-disc list-inside text-xs space-y-0.5 ml-1">
+                          <li>Python virtual environment</li>
+                          <li>PyTorch CPU — ~150 MB</li>
+                          <li>Dependencies (numpy, omegaconf) — ~5 MB</li>
+                        </ul>
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                          <span className="font-medium">Models downloaded on first use:</span>
+                        </div>
+                        <ul className="list-disc list-inside ml-5 space-y-0.5">
+                          <li>Russian (v5_ru) — ~70 MB, 5 voices</li>
+                          <li>English (v3_en) — ~100 MB, 118 voices</li>
+                        </ul>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">Initial download: ~155 MB</span>
                         <Button
                           variant="default"
                           size="sm"
@@ -738,9 +833,11 @@ function App() {
                             if (!window.electronAPI) return
                             setIsInstallingSilero(true)
                             setSileroInstallProgress('Starting installation...')
+                            setSileroInstallPercent(0)
 
-                            const unsubscribe = window.electronAPI.onSetupProgress(({ details }) => {
+                            const unsubscribe = window.electronAPI.onSetupProgress(({ progress, details }) => {
                               setSileroInstallProgress(details)
+                              setSileroInstallPercent(progress)
                             })
 
                             try {
@@ -748,6 +845,7 @@ function App() {
                               if (result.success) {
                                 setSileroInstalled(true)
                                 setSileroInstallProgress('')
+                                setSileroInstallPercent(0)
                               } else {
                                 setError(result.error || 'Silero installation failed')
                               }
@@ -762,28 +860,471 @@ function App() {
                           <Download className="h-4 w-4 mr-2" />
                           Install Silero
                         </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Coqui Setup Notice */}
+              {selectedProvider === 'coqui' && !coquiInstalled && (
+                <div className="space-y-2 p-3 border rounded-md bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <Wand2 className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">Coqui XTTS-v2 Setup Required</span>
+                  </div>
+                  {!pythonAvailable ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Coqui requires Python 3.9+ to be installed on your system.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Download Python from{' '}
+                        <a
+                          href="https://www.python.org/downloads/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline hover:text-foreground"
+                        >
+                          python.org
+                        </a>
+                        {' '}and restart the application.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Coqui needs to download XTTS-v2 model (~2.5GB). This is a one-time setup.
+                      </p>
+                      {isInstallingCoqui ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-sm">{coquiInstallProgress || 'Installing...'}</span>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={async () => {
+                            if (!window.electronAPI) return
+                            setIsInstallingCoqui(true)
+                            setCoquiInstallProgress('Starting installation...')
+
+                            const unsubscribe = window.electronAPI.onSetupProgress(({ details }) => {
+                              setCoquiInstallProgress(details)
+                            })
+
+                            try {
+                              const result = await window.electronAPI.installCoqui()
+                              if (result.success) {
+                                setCoquiInstalled(true)
+                                setCoquiInstallProgress('')
+                              } else {
+                                setError(result.error || 'Coqui installation failed')
+                              }
+                            } catch (err) {
+                              setError((err as Error).message)
+                            } finally {
+                              setIsInstallingCoqui(false)
+                              unsubscribe()
+                            }
+                          }}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Install Coqui
+                        </Button>
                       )}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Voice & Speed Row */}
+              {/* Piper Setup Notice */}
+              {selectedProvider === 'piper' && !piperInstalled && (
+                <div className="space-y-3 p-4 border rounded-md bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">Piper TTS Setup Required</span>
+                  </div>
+                  {isInstallingPiperCore ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">{piperCoreInstallProgress || 'Installing...'}</span>
+                          <span className="font-medium">{piperCoreInstallPercent}%</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300 ease-out"
+                            style={{ width: `${piperCoreInstallPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Please wait...
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <p>For Piper to work, the TTS engine will be installed (~22 MB).</p>
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Cpu className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                          <span className="font-medium">Voice models installed separately (~20-60 MB each)</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={async () => {
+                            if (!window.electronAPI) return
+                            setIsInstallingPiperCore(true)
+                            setPiperCoreInstallProgress('Starting installation...')
+                            setPiperCoreInstallPercent(0)
+
+                            const unsubscribe = window.electronAPI.onSetupProgress(({ progress, details }) => {
+                              setPiperCoreInstallProgress(details)
+                              setPiperCoreInstallPercent(progress)
+                            })
+
+                            try {
+                              const piperResult = await window.electronAPI.installPiper()
+                              if (!piperResult.success) {
+                                setError(piperResult.error || 'Piper installation failed')
+                                return
+                              }
+
+                              setPiperInstalled(true)
+                              setPiperCoreInstallProgress('')
+                              setPiperCoreInstallPercent(0)
+                            } catch (err) {
+                              setError((err as Error).message)
+                            } finally {
+                              setIsInstallingPiperCore(false)
+                              unsubscribe()
+                            }
+                          }}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Install Piper
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* RHVoice Setup Notice */}
+              {selectedProvider === 'rhvoice' && !rhvoiceCoreInstalled && (
+                <div className="space-y-3 p-4 border rounded-md bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">RHVoice Setup Required</span>
+                  </div>
+                  {isInstallingRHVoiceCore ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">{rhvoiceCoreInstallProgress || 'Installing...'}</span>
+                          <span className="font-medium">{rhvoiceCoreInstallPercent}%</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300 ease-out"
+                            style={{ width: `${rhvoiceCoreInstallPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Please wait...
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <p>For RHVoice to work, the SAPI addon will be installed (~10 MB).</p>
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                          <span className="font-medium">Voice packs installed separately (~15-25 MB each)</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={async () => {
+                            if (!window.electronAPI) return
+                            setIsInstallingRHVoiceCore(true)
+                            setRhvoiceCoreInstallProgress('Starting installation...')
+                            setRhvoiceCoreInstallPercent(0)
+
+                            const unsubscribe = window.electronAPI.onSetupProgress(({ progress, details }) => {
+                              setRhvoiceCoreInstallProgress(details)
+                              setRhvoiceCoreInstallPercent(progress)
+                            })
+
+                            try {
+                              const rhResult = await window.electronAPI.installRHVoiceCore()
+                              if (!rhResult.success) {
+                                setError(rhResult.error || 'RHVoice installation failed')
+                                return
+                              }
+
+                              setRhvoiceCoreInstalled(true)
+                              setRhvoiceCoreInstallProgress('')
+                              setRhvoiceCoreInstallPercent(0)
+                            } catch (err) {
+                              setError((err as Error).message)
+                            } finally {
+                              setIsInstallingRHVoiceCore(false)
+                              unsubscribe()
+                            }
+                          }}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Install RHVoice
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Language & Voice Row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Language Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Language</Label>
+                  <Select value={language} onValueChange={setLanguage} disabled={isConverting}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LANGUAGES.map(lang => (
+                        <SelectItem key={lang.code} value={lang.code}>
+                          {lang.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Voice Selection */}
                 <div className="space-y-1.5">
                   <Label className="text-sm">Voice</Label>
                   <div className="flex gap-1.5">
-                    <Select value={selectedVoice} onValueChange={setSelectedVoice} disabled={isConverting}>
+                    <Select
+                      value={selectedVoice}
+                      open={voiceSelectOpen}
+                      onOpenChange={setVoiceSelectOpen}
+                      onValueChange={(value) => {
+                        // Only allow selecting installed voices for Piper and RHVoice
+                        const voice = filteredVoices.find(v => v.shortName === value)
+                        if (voice && (selectedProvider === 'piper' || selectedProvider === 'rhvoice') && voice.isInstalled === false) {
+                          return // Don't select uninstalled voice
+                        }
+                        setSelectedVoice(value)
+                      }}
+                      disabled={!isProviderReady || isConverting || installingVoice !== null || installingRHVoice !== null}
+                    >
                       <SelectTrigger className="flex-1 h-9">
-                        <SelectValue placeholder="Select voice" />
+                        <SelectValue placeholder={
+                          !isProviderReady ? "Setup required" : "Select voice"
+                        }>
+                          {selectedVoice && (() => {
+                            const voice = filteredVoices.find(v => v.shortName === selectedVoice)
+                            if (voice) {
+                              return <span>{voice.gender === 'Male' ? '👨' : '👩'} {voice.name}</span>
+                            }
+                            return null
+                          })()}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {filteredVoices.map(voice => (
-                          <SelectItem key={voice.shortName} value={voice.shortName}>
-                            {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
-                          </SelectItem>
-                        ))}
+                        {filteredVoices.map(voice => {
+                          const isPiper = selectedProvider === 'piper'
+                          const isRHVoice = selectedProvider === 'rhvoice'
+                          const isVoiceInstalled = voice.isInstalled !== false
+                          const isInstallingPiper = installingVoice === voice.shortName
+                          const isInstallingRH = installingRHVoice === voice.shortName
+
+                          // RHVoice voices with install/installed indicator
+                          if (isRHVoice) {
+                            return (
+                              <div
+                                key={voice.shortName}
+                                className={`flex items-center justify-between px-2 py-1.5 text-sm rounded-sm ${
+                                  isVoiceInstalled
+                                    ? 'cursor-pointer hover:bg-accent'
+                                    : 'opacity-50 cursor-default'
+                                }`}
+                                onClick={() => {
+                                  if (isVoiceInstalled && !isInstallingRH) {
+                                    setSelectedVoice(voice.shortName)
+                                    setVoiceSelectOpen(false)
+                                  }
+                                }}
+                              >
+                                <span>
+                                  {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                                </span>
+                                {isVoiceInstalled ? null : isInstallingRH ? (
+                                  <div className="relative w-6 h-6">
+                                    <svg className="w-6 h-6 -rotate-90">
+                                      <circle
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        className="opacity-20"
+                                      />
+                                      <circle
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeDasharray={`${rhvoiceInstallProgress * 0.628} 62.8`}
+                                        className="text-primary"
+                                      />
+                                    </svg>
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                                    disabled={installingRHVoice !== null}
+                                    onClick={async (e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      if (!window.electronAPI) return
+
+                                      setInstallingRHVoice(voice.shortName)
+                                      setRHVoiceInstallProgress(0)
+
+                                      const unsubscribe = window.electronAPI.onSetupProgress(({ progress }) => {
+                                        setRHVoiceInstallProgress(progress)
+                                      })
+
+                                      try {
+                                        const result = await window.electronAPI.installRHVoice(voice.shortName, language)
+
+                                        if (result.success) {
+                                          // Reload voices to update installed status
+                                          const loadedVoices = await window.electronAPI.getVoices(language)
+                                          setVoices(loadedVoices)
+                                          // Select the newly installed voice
+                                          setSelectedVoice(voice.shortName)
+                                          // Close the dropdown
+                                          setVoiceSelectOpen(false)
+                                        } else {
+                                          setError(result.error || 'Voice installation failed')
+                                        }
+                                      } catch (err) {
+                                        setError((err as Error).message)
+                                      } finally {
+                                        setInstallingRHVoice(null)
+                                        setRHVoiceInstallProgress(0)
+                                        unsubscribe()
+                                      }
+                                    }}
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          }
+
+                          if (isPiper) {
+                            // Show Piper voices with install/installed indicator
+                            return (
+                              <div
+                                key={voice.shortName}
+                                className={`flex items-center justify-between px-2 py-1.5 text-sm rounded-sm ${
+                                  isVoiceInstalled
+                                    ? 'cursor-pointer hover:bg-accent'
+                                    : 'opacity-50 cursor-default'
+                                }`}
+                                onClick={() => {
+                                  if (isVoiceInstalled && !isInstallingPiper) {
+                                    setSelectedVoice(voice.shortName)
+                                    setVoiceSelectOpen(false)
+                                  }
+                                }}
+                              >
+                                <span>
+                                  {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                                </span>
+                                {isVoiceInstalled ? null : (
+                                  <button
+                                    className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                                    disabled={isInstallingPiper || installingVoice !== null}
+                                    onClick={async (e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      if (!window.electronAPI) return
+
+                                      setInstallingVoice(voice.shortName)
+                                      setVoiceInstallProgress('Starting...')
+
+                                      const unsubscribe = window.electronAPI.onSetupProgress(({ details }) => {
+                                        setVoiceInstallProgress(details)
+                                      })
+
+                                      try {
+                                        // Parse voice info from shortName and determine quality
+                                        const voiceName = voice.shortName.replace('piper-', '')
+                                        const lang = language === 'ru-RU' ? 'ru_RU' : 'en_US'
+                                        // Amy uses 'low' quality, others use 'medium'
+                                        const quality = voiceName === 'amy' ? 'low' : 'medium'
+
+                                        const result = await window.electronAPI.installPiperVoice(lang, voiceName, quality)
+
+                                        if (result.success) {
+                                          // Reload voices to update installed status
+                                          const loadedVoices = await window.electronAPI.getVoices(language)
+                                          setVoices(loadedVoices)
+                                          // Select the newly installed voice
+                                          setSelectedVoice(voice.shortName)
+                                          // Close the dropdown
+                                          setVoiceSelectOpen(false)
+                                        } else {
+                                          setError(result.error || 'Voice installation failed')
+                                        }
+                                      } catch (err) {
+                                        setError((err as Error).message)
+                                      } finally {
+                                        setInstallingVoice(null)
+                                        setVoiceInstallProgress('')
+                                        unsubscribe()
+                                      }
+                                    }}
+                                  >
+                                    {isInstallingPiper ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Download className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          }
+
+                          return (
+                            <SelectItem key={voice.shortName} value={voice.shortName}>
+                              {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                            </SelectItem>
+                          )
+                        })}
                       </SelectContent>
                     </Select>
                     <Button
@@ -791,7 +1332,7 @@ function App() {
                       size="icon"
                       className="h-9 w-9"
                       onClick={handlePreviewVoice}
-                      disabled={!selectedVoice || isConverting || isPreviewing}
+                      disabled={!isProviderReady || !isSelectedVoiceValid || isConverting || isPreviewing || installingVoice !== null || installingRHVoice !== null}
                       title="Preview voice"
                     >
                       {isPreviewing ? (
@@ -802,6 +1343,60 @@ function App() {
                     </Button>
                   </div>
                 </div>
+              </div>
+
+              {/* Preview & Speed Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Preview Text */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">Preview</Label>
+                    {!isEditingPreview && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={startEditingPreview}
+                        className="h-6 w-6"
+                        disabled={!isProviderReady || isConverting || isPreviewing}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                  {!isEditingPreview ? (
+                    <div className="text-xs text-muted-foreground italic truncate">
+                      "{previewText}"
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <textarea
+                        value={tempPreviewText}
+                        onChange={(e) => setTempPreviewText(e.target.value)}
+                        className="w-full p-2 text-sm border rounded-md bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                        rows={2}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            savePreviewText()
+                          }
+                          if (e.key === 'Escape') {
+                            cancelEditingPreview()
+                          }
+                        }}
+                      />
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="sm" onClick={cancelEditingPreview} className="h-6 px-2 text-xs">
+                          Cancel
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={savePreviewText} className="h-6 px-2 text-xs">
+                          <Check className="h-3 w-3 mr-1" />
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Speed Control */}
                 <div className="space-y-1.5">
@@ -811,62 +1406,36 @@ function App() {
                       {speed[0].toFixed(1)}x
                     </span>
                   </div>
-                  <Slider
-                    value={speed}
-                    onValueChange={setSpeed}
-                    min={0.5}
-                    max={2.0}
-                    step={0.1}
-                    disabled={isConverting}
-                    className="py-2"
-                  />
-                </div>
-              </div>
-
-              {/* Preview Text - collapsed */}
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="italic truncate flex-1">Preview: "{previewText}"</span>
-                {!isEditingPreview ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={startEditingPreview}
-                    className="h-5 px-1.5 text-xs"
-                    disabled={isConverting || isPreviewing}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                ) : null}
-              </div>
-              {isEditingPreview && (
-                <div className="space-y-1.5">
-                  <textarea
-                    value={tempPreviewText}
-                    onChange={(e) => setTempPreviewText(e.target.value)}
-                    className="w-full p-2 text-sm border rounded-md bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-                    rows={2}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        savePreviewText()
-                      }
-                      if (e.key === 'Escape') {
-                        cancelEditingPreview()
-                      }
-                    }}
-                  />
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={cancelEditingPreview} className="h-6 px-2 text-xs">
-                      Cancel
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={savePreviewText} className="h-6 px-2 text-xs">
-                      <Check className="h-3 w-3 mr-1" />
-                      Save
-                    </Button>
+                  <div className="relative pb-8">
+                    <Slider
+                      value={speed}
+                      onValueChange={setSpeed}
+                      min={0.5}
+                      max={2.0}
+                      step={0.1}
+                      disabled={!isProviderReady || isConverting}
+                    />
+                    {/* Breakpoint marks with labels - left/right 8px = thumb radius */}
+                    <div className="absolute left-2 right-2 top-[16px] pointer-events-none">
+                      {[0.5, 1.0, 1.5, 2.0].map((val) => {
+                        const percent = ((val - 0.5) / 1.5) * 100
+                        return (
+                          <div
+                            key={val}
+                            className="absolute flex flex-col items-center -translate-x-1/2"
+                            style={{ left: `${percent}%` }}
+                          >
+                            <div className="w-px h-1.5 bg-muted-foreground/50" />
+                            <span className="text-[9px] text-muted-foreground/60 mt-0.5">
+                              {val.toFixed(1)}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
-              )}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -900,25 +1469,25 @@ function App() {
           </Card>
         )}
 
-        {/* Action Buttons */}
+        {/* Action Buttons - disabled when provider is not ready */}
         {file && bookContent && (
-          <div className="flex justify-center gap-4">
+          <div className="w-full">
             {!isConverting ? (
               <Button
                 onClick={handleConvert}
-                disabled={!selectedVoice}
-                className="gap-2"
+                disabled={!isProviderReady || !isSelectedVoiceValid}
+                className="w-full h-12 text-base gap-2"
               >
-                <Play className="h-4 w-4" />
+                <Play className="h-5 w-5" />
                 Convert to MP3
               </Button>
             ) : (
               <Button
                 variant="destructive"
                 onClick={handleCancel}
-                className="gap-2"
+                className="w-full h-12 text-base gap-2"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
                 Cancel
               </Button>
             )}
