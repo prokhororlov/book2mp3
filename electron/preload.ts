@@ -120,8 +120,14 @@ const electronAPI = {
   installSilero: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('install-silero'),
 
-  installCoqui: (): Promise<{ success: boolean; error?: string }> =>
+  installCoqui: (): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> =>
     ipcRenderer.invoke('install-coqui'),
+
+  checkBuildTools: (): Promise<boolean> =>
+    ipcRenderer.invoke('check-build-tools'),
+
+  installBuildTools: (): Promise<{ success: boolean; error?: string; requiresRestart?: boolean }> =>
+    ipcRenderer.invoke('install-build-tools'),
 
   installPiper: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('install-piper'),

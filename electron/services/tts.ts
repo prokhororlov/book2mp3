@@ -3,11 +3,11 @@ import path from 'path'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { app } from 'electron'
-import { checkSileroInstalled, getInstalledRHVoices } from './setup'
+import { checkSileroInstalled, checkCoquiInstalled, getInstalledRHVoices } from './setup'
 
 const execAsync = promisify(exec)
 
-export type TTSProvider = 'rhvoice' | 'piper' | 'silero' | 'elevenlabs'
+export type TTSProvider = 'rhvoice' | 'piper' | 'silero' | 'elevenlabs' | 'coqui'
 
 export interface VoiceInfo {
   name: string
@@ -134,6 +134,127 @@ const ELEVENLABS_VOICES: Record<string, VoiceInfo[]> = {
   ]
 }
 
+
+// Coqui XTTS-v2 voice configurations (built-in speakers)
+const COQUI_VOICES: Record<string, VoiceInfo[]> = {
+  'ru-RU': [
+    { name: 'Claribel Dervla', shortName: 'coqui-claribel', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Claribel Dervla' },
+    { name: 'Daisy Studious', shortName: 'coqui-daisy', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Daisy Studious' },
+    { name: 'Gracie Wise', shortName: 'coqui-gracie', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Gracie Wise' },
+    { name: 'Tammie Ema', shortName: 'coqui-tammie', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Tammie Ema' },
+    { name: 'Alison Dietlinde', shortName: 'coqui-alison', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Alison Dietlinde' },
+    { name: 'Ana Florence', shortName: 'coqui-ana', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Ana Florence' },
+    { name: 'Annmarie Nele', shortName: 'coqui-annmarie', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Annmarie Nele' },
+    { name: 'Asya Anara', shortName: 'coqui-asya', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Asya Anara' },
+    { name: 'Brenda Stern', shortName: 'coqui-brenda', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Brenda Stern' },
+    { name: 'Gitta Nikolina', shortName: 'coqui-gitta', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Gitta Nikolina' },
+    { name: 'Henriette Usha', shortName: 'coqui-henriette', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Henriette Usha' },
+    { name: 'Sofia Hellen', shortName: 'coqui-sofia', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Sofia Hellen' },
+    { name: 'Tammy Grit', shortName: 'coqui-tammy', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Tammy Grit' },
+    { name: 'Tanja Adelina', shortName: 'coqui-tanja', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Tanja Adelina' },
+    { name: 'Vjollca Johnnie', shortName: 'coqui-vjollca', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Vjollca Johnnie' },
+    { name: 'Andrew Chipper', shortName: 'coqui-andrew', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Andrew Chipper' },
+    { name: 'Badr Odhiambo', shortName: 'coqui-badr', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Badr Odhiambo' },
+    { name: 'Dionisio Schuyler', shortName: 'coqui-dionisio', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Dionisio Schuyler' },
+    { name: 'Royston Min', shortName: 'coqui-royston', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Royston Min' },
+    { name: 'Viktor Eka', shortName: 'coqui-viktor', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Viktor Eka' },
+    { name: 'Abrahan Mack', shortName: 'coqui-abrahan', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Abrahan Mack' },
+    { name: 'Adde Michal', shortName: 'coqui-adde', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Adde Michal' },
+    { name: 'Baldur Sanjin', shortName: 'coqui-baldur', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Baldur Sanjin' },
+    { name: 'Craig Gutsy', shortName: 'coqui-craig', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Craig Gutsy' },
+    { name: 'Damien Black', shortName: 'coqui-damien', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Damien Black' },
+    { name: 'Gilberto Mathias', shortName: 'coqui-gilberto', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Gilberto Mathias' },
+    { name: 'Ilkin Urbano', shortName: 'coqui-ilkin', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Ilkin Urbano' },
+    { name: 'Kazuhiko Atallah', shortName: 'coqui-kazuhiko', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Kazuhiko Atallah' },
+    { name: 'Ludvig Milivoj', shortName: 'coqui-ludvig', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Ludvig Milivoj' },
+    { name: 'Suad Qasim', shortName: 'coqui-suad', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Suad Qasim' },
+    { name: 'Torcull Diarmuid', shortName: 'coqui-torcull', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Torcull Diarmuid' },
+    { name: 'Viktor Menelaos', shortName: 'coqui-viktor-m', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Viktor Menelaos' },
+    { name: 'Zacharie Aimilios', shortName: 'coqui-zacharie', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Zacharie Aimilios' },
+    { name: 'Nova Hogarth', shortName: 'coqui-nova', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Nova Hogarth' },
+    { name: 'Maja Ruoho', shortName: 'coqui-maja', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Maja Ruoho' },
+    { name: 'Uta Obando', shortName: 'coqui-uta', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Uta Obando' },
+    { name: 'Lidiya Szekeres', shortName: 'coqui-lidiya', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Lidiya Szekeres' },
+    { name: 'Chandra MacFarland', shortName: 'coqui-chandra', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Chandra MacFarland' },
+    { name: 'Szofi Granger', shortName: 'coqui-szofi', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Szofi Granger' },
+    { name: 'Camber Rassington', shortName: 'coqui-camber', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Camber Rassington' },
+    { name: 'Narelle Moon', shortName: 'coqui-narelle', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Narelle Moon' },
+    { name: 'Barbora MacLean', shortName: 'coqui-barbora', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Barbora MacLean' },
+    { name: 'Alexandra Hisakawa', shortName: 'coqui-alexandra', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Alexandra Hisakawa' },
+    { name: 'Alma María', shortName: 'coqui-alma', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Alma María' },
+    { name: 'Rosemary Okafor', shortName: 'coqui-rosemary', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Rosemary Okafor' },
+    { name: 'Ige Behringer', shortName: 'coqui-ige', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Ige Behringer' },
+    { name: 'Filip Traverse', shortName: 'coqui-filip', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Filip Traverse' },
+    { name: 'Damjan Chapman', shortName: 'coqui-damjan', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Damjan Chapman' },
+    { name: 'Wulf Carlevaro', shortName: 'coqui-wulf', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Wulf Carlevaro' },
+    { name: 'Aaron Dreschner', shortName: 'coqui-aaron', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Aaron Dreschner' },
+    { name: 'Kumar Dahl', shortName: 'coqui-kumar', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Kumar Dahl' },
+    { name: 'Eugenio Mataracı', shortName: 'coqui-eugenio', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Eugenio Mataracı' },
+    { name: 'Ferran Simen', shortName: 'coqui-ferran', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Ferran Simen' },
+    { name: 'Xavier Hayasaka', shortName: 'coqui-xavier', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Xavier Hayasaka' },
+    { name: 'Luis Moray', shortName: 'coqui-luis', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Luis Moray' },
+    { name: 'Marcos Rudaski', shortName: 'coqui-marcos', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Marcos Rudaski' }
+  ],
+  'en': [
+    { name: 'Claribel Dervla', shortName: 'coqui-claribel-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Claribel Dervla' },
+    { name: 'Daisy Studious', shortName: 'coqui-daisy-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Daisy Studious' },
+    { name: 'Gracie Wise', shortName: 'coqui-gracie-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Gracie Wise' },
+    { name: 'Tammie Ema', shortName: 'coqui-tammie-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Tammie Ema' },
+    { name: 'Alison Dietlinde', shortName: 'coqui-alison-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Alison Dietlinde' },
+    { name: 'Ana Florence', shortName: 'coqui-ana-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Ana Florence' },
+    { name: 'Annmarie Nele', shortName: 'coqui-annmarie-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Annmarie Nele' },
+    { name: 'Asya Anara', shortName: 'coqui-asya-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Asya Anara' },
+    { name: 'Brenda Stern', shortName: 'coqui-brenda-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Brenda Stern' },
+    { name: 'Gitta Nikolina', shortName: 'coqui-gitta-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Gitta Nikolina' },
+    { name: 'Henriette Usha', shortName: 'coqui-henriette-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Henriette Usha' },
+    { name: 'Sofia Hellen', shortName: 'coqui-sofia-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Sofia Hellen' },
+    { name: 'Tammy Grit', shortName: 'coqui-tammy-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Tammy Grit' },
+    { name: 'Tanja Adelina', shortName: 'coqui-tanja-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Tanja Adelina' },
+    { name: 'Vjollca Johnnie', shortName: 'coqui-vjollca-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Vjollca Johnnie' },
+    { name: 'Andrew Chipper', shortName: 'coqui-andrew-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Andrew Chipper' },
+    { name: 'Badr Odhiambo', shortName: 'coqui-badr-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Badr Odhiambo' },
+    { name: 'Dionisio Schuyler', shortName: 'coqui-dionisio-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Dionisio Schuyler' },
+    { name: 'Royston Min', shortName: 'coqui-royston-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Royston Min' },
+    { name: 'Viktor Eka', shortName: 'coqui-viktor-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Viktor Eka' },
+    { name: 'Abrahan Mack', shortName: 'coqui-abrahan-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Abrahan Mack' },
+    { name: 'Adde Michal', shortName: 'coqui-adde-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Adde Michal' },
+    { name: 'Baldur Sanjin', shortName: 'coqui-baldur-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Baldur Sanjin' },
+    { name: 'Craig Gutsy', shortName: 'coqui-craig-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Craig Gutsy' },
+    { name: 'Damien Black', shortName: 'coqui-damien-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Damien Black' },
+    { name: 'Gilberto Mathias', shortName: 'coqui-gilberto-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Gilberto Mathias' },
+    { name: 'Ilkin Urbano', shortName: 'coqui-ilkin-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Ilkin Urbano' },
+    { name: 'Kazuhiko Atallah', shortName: 'coqui-kazuhiko-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Kazuhiko Atallah' },
+    { name: 'Ludvig Milivoj', shortName: 'coqui-ludvig-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Ludvig Milivoj' },
+    { name: 'Suad Qasim', shortName: 'coqui-suad-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Suad Qasim' },
+    { name: 'Torcull Diarmuid', shortName: 'coqui-torcull-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Torcull Diarmuid' },
+    { name: 'Viktor Menelaos', shortName: 'coqui-viktor-m-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Viktor Menelaos' },
+    { name: 'Zacharie Aimilios', shortName: 'coqui-zacharie-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Zacharie Aimilios' },
+    { name: 'Nova Hogarth', shortName: 'coqui-nova-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Nova Hogarth' },
+    { name: 'Maja Ruoho', shortName: 'coqui-maja-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Maja Ruoho' },
+    { name: 'Uta Obando', shortName: 'coqui-uta-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Uta Obando' },
+    { name: 'Lidiya Szekeres', shortName: 'coqui-lidiya-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Lidiya Szekeres' },
+    { name: 'Chandra MacFarland', shortName: 'coqui-chandra-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Chandra MacFarland' },
+    { name: 'Szofi Granger', shortName: 'coqui-szofi-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Szofi Granger' },
+    { name: 'Camber Rassington', shortName: 'coqui-camber-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Camber Rassington' },
+    { name: 'Narelle Moon', shortName: 'coqui-narelle-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Narelle Moon' },
+    { name: 'Barbora MacLean', shortName: 'coqui-barbora-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Barbora MacLean' },
+    { name: 'Alexandra Hisakawa', shortName: 'coqui-alexandra-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Alexandra Hisakawa' },
+    { name: 'Alma María', shortName: 'coqui-alma-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Alma María' },
+    { name: 'Rosemary Okafor', shortName: 'coqui-rosemary-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Rosemary Okafor' },
+    { name: 'Ige Behringer', shortName: 'coqui-ige-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Ige Behringer' },
+    { name: 'Filip Traverse', shortName: 'coqui-filip-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Filip Traverse' },
+    { name: 'Damjan Chapman', shortName: 'coqui-damjan-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Damjan Chapman' },
+    { name: 'Wulf Carlevaro', shortName: 'coqui-wulf-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Wulf Carlevaro' },
+    { name: 'Aaron Dreschner', shortName: 'coqui-aaron-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Aaron Dreschner' },
+    { name: 'Kumar Dahl', shortName: 'coqui-kumar-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Kumar Dahl' },
+    { name: 'Eugenio Mataracı', shortName: 'coqui-eugenio-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Eugenio Mataracı' },
+    { name: 'Ferran Simen', shortName: 'coqui-ferran-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Ferran Simen' },
+    { name: 'Xavier Hayasaka', shortName: 'coqui-xavier-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Xavier Hayasaka' },
+    { name: 'Luis Moray', shortName: 'coqui-luis-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Luis Moray' },
+    { name: 'Marcos Rudaski', shortName: 'coqui-marcos-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Marcos Rudaski' }
+  ]
+}
+
 // ElevenLabs API key storage
 let elevenLabsApiKey: string | null = null
 
@@ -184,6 +305,11 @@ export async function getVoicesForLanguage(language: string, provider?: TTSProvi
     allVoices = allVoices.concat(ELEVENLABS_VOICES[language] || [])
   }
 
+  // Coqui XTTS-v2 requires Python environment to be set up
+  if ((!provider || provider === 'coqui') && checkCoquiInstalled()) {
+    allVoices = allVoices.concat(COQUI_VOICES[language] || [])
+  }
+
   if (allVoices.length === 0) {
     throw new Error(`Language ${language} is not supported`)
   }
@@ -209,7 +335,7 @@ export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; 
     {
       id: 'piper',
       name: 'Piper',
-      description: 'Нейросетевой синтез на ONNX. Высокое качество звучания при быстрой генерации. Компактные голосовые модели, полностью офлайн работа.',
+      description: 'Нейросетевой синтез на базе ONNX Runtime. Высокое качество звучания при быстрой генерации речи. Компактные голосовые модели, полностью офлайн работа на CPU.',
       requiresSetup: true
     },
     {
@@ -218,6 +344,13 @@ export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; 
       description: 'Продвинутый нейросетевой движок на PyTorch. Естественное и выразительное звучание, множество голосов. Работает офлайн, требует больше времени на генерацию.',
       requiresSetup: true
     },
+    // temporarily disabled
+    // {
+    //   id: 'coqui',
+    //   name: 'Coqui XTTS-v2',
+    //   description: 'Продвинутая мультиязычная модель с 55+ встроенными голосами. Высочайшее качество синтеза, поддержка множества языков. Требует ~4GB места и GPU для ускорения.',
+    //   requiresSetup: true
+    // },
     {
       id: 'elevenlabs',
       name: 'ElevenLabs',
@@ -239,6 +372,8 @@ export function isProviderAvailableForLanguage(provider: TTSProvider, language: 
       return SILERO_VOICES[language] !== undefined
     case 'elevenlabs':
       return ELEVENLABS_VOICES[language] !== undefined
+    case 'coqui':
+      return COQUI_VOICES[language] !== undefined
     default:
       return false
   }
@@ -274,6 +409,18 @@ function getSileroPythonExecutable(): string {
 function getSileroScript(): string {
   const resourcesPath = getResourcesPath()
   return path.join(resourcesPath, 'silero', 'generate.py')
+}
+
+
+// Coqui XTTS-v2 path helpers
+function getCoquiPythonExecutable(): string {
+  const resourcesPath = getResourcesPath()
+  return path.join(resourcesPath, 'coqui', 'venv', 'Scripts', 'python.exe')
+}
+
+function getCoquiScript(): string {
+  const resourcesPath = getResourcesPath()
+  return path.join(resourcesPath, 'coqui', 'generate.py')
 }
 
 // Clean text for TTS
@@ -507,6 +654,65 @@ async function generateSpeechWithSilero(
   })
 }
 
+
+async function generateSpeechWithCoqui(
+  text: string,
+  speakerName: string,
+  language: string,
+  outputPath: string
+): Promise<void> {
+  const pythonExe = getCoquiPythonExecutable()
+  const coquiScript = getCoquiScript()
+
+  if (!fs.existsSync(pythonExe)) {
+    throw new Error('Coqui Python environment not found. Please run setup.')
+  }
+
+  if (!fs.existsSync(coquiScript)) {
+    throw new Error('Coqui generation script not found.')
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const args = [
+      coquiScript,
+      '--text', text,
+      '--speaker', speakerName,
+      '--language', language,
+      '--output', outputPath
+    ]
+
+    const coquiProcess = spawn(pythonExe, args)
+    let stderr = ''
+    let stdout = ''
+
+    coquiProcess.stdout?.on('data', (data) => {
+      stdout += data.toString()
+    })
+
+    coquiProcess.stderr?.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    coquiProcess.on('error', (error) => {
+      reject(new Error(`Failed to start Coqui: ${error.message}`))
+    })
+
+    coquiProcess.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Coqui exited with code ${code}: ${stderr}`))
+        return
+      }
+
+      if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+        reject(new Error('Coqui failed to generate audio file'))
+        return
+      }
+
+      resolve()
+    })
+  })
+}
+
 // ============= ElevenLabs Implementation =============
 async function generateSpeechWithElevenLabs(
   text: string,
@@ -606,6 +812,13 @@ async function processChunk(
           await generateSpeechWithElevenLabs(chunk, voiceInfo.voiceId, tempFile)
           break
 
+        case 'coqui':
+          if (!voiceInfo.modelPath) {
+            throw new Error('Speaker name required for Coqui')
+          }
+          await generateSpeechWithCoqui(chunk, voiceInfo.modelPath, voiceInfo.locale, tempFile)
+          break
+
         default:
           throw new Error(`Unknown provider: ${voiceInfo.provider}`)
       }
@@ -645,7 +858,8 @@ export async function convertToSpeech(
     ...Object.values(RHVOICE_VOICES).flat(),
     ...Object.values(PIPER_VOICES).flat(),
     ...Object.values(SILERO_VOICES).flat(),
-    ...Object.values(ELEVENLABS_VOICES).flat()
+    ...Object.values(ELEVENLABS_VOICES).flat(),
+    ...Object.values(COQUI_VOICES).flat()
   ]
 
   voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
@@ -654,9 +868,9 @@ export async function convertToSpeech(
     throw new Error(`Voice not found: ${voiceShortName}`)
   }
 
-  // Silero has a token limit (~5000) in the positional encoder.
+  // Silero and Coqui have token limits in the positional encoder.
   // Cyrillic/non-Latin text expands to more tokens, so use smaller chunks.
-  const maxChunkLength = voiceInfo.provider === 'silero' ? 500 : 1000
+  const maxChunkLength = (voiceInfo.provider === 'silero' || voiceInfo.provider === 'coqui') ? 500 : 1000
   const chunks = splitIntoChunks(text, maxChunkLength)
 
   if (chunks.length === 0) {
@@ -850,7 +1064,8 @@ export async function previewVoice(
     ...Object.values(RHVOICE_VOICES).flat(),
     ...Object.values(PIPER_VOICES).flat(),
     ...Object.values(SILERO_VOICES).flat(),
-    ...Object.values(ELEVENLABS_VOICES).flat()
+    ...Object.values(ELEVENLABS_VOICES).flat(),
+    ...Object.values(COQUI_VOICES).flat()
   ]
 
   const voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
@@ -897,6 +1112,13 @@ export async function previewVoice(
           return { success: false, error: 'Voice ID required for ElevenLabs' }
         }
         await generateSpeechWithElevenLabs(text, voiceInfo.voiceId, tempWavFile)
+        break
+
+      case 'coqui':
+        if (!voiceInfo.modelPath) {
+          return { success: false, error: 'Speaker name required for Coqui' }
+        }
+        await generateSpeechWithCoqui(text, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
         break
 
       default:

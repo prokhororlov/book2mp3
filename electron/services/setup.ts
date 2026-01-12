@@ -22,6 +22,7 @@ export interface DependencyStatus {
   sileroAvailable: boolean // true if Python is available for Silero setup
   coqui: boolean
   coquiAvailable: boolean // true if Python is available for Coqui setup
+  coquiBuildToolsAvailable: boolean // true if Visual Studio Build Tools are installed (required for Coqui)
   rhvoiceCore: boolean // true if RHVoice SAPI engine is installed
   rhvoiceVoices: string[] // list of installed RHVoice voice names
   piperVoices: {
@@ -125,6 +126,207 @@ export async function checkPythonAvailable(): Promise<string | null> {
   return null
 }
 
+
+// Check if Visual Studio Build Tools (C++ compiler) is available
+export async function checkBuildToolsAvailable(): Promise<boolean> {
+  // Helper function to check for cl.exe in MSVC path
+  const checkMsvcPath = (msvcPath: string): boolean => {
+    if (existsSync(msvcPath)) {
+      try {
+        const versions = fs.readdirSync(msvcPath)
+        for (const version of versions) {
+          const clPath = path.join(msvcPath, version, 'bin', 'Hostx64', 'x64', 'cl.exe')
+          if (existsSync(clPath)) {
+            return true
+          }
+        }
+      } catch {
+        // Ignore read errors
+      }
+    }
+    return false
+  }
+
+  // Method 1: Use vswhere.exe to find Visual Studio installations with C++ tools
+  const vswherePaths = [
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe'
+  ]
+
+  for (const vswherePath of vswherePaths) {
+    if (existsSync(vswherePath)) {
+      try {
+        // Query for installations with VC++ tools component
+        const { stdout } = await execAsync(
+          `"${vswherePath}" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`,
+          { timeout: 10000 }
+        )
+        
+        if (stdout.trim()) {
+          const vsPath = stdout.trim()
+          const msvcPath = path.join(vsPath, 'VC', 'Tools', 'MSVC')
+          if (checkMsvcPath(msvcPath)) {
+            return true
+          }
+        }
+      } catch {
+        // vswhere failed, continue to fallback
+      }
+    }
+  }
+
+  // Method 2: Direct path check for common VS/Build Tools installations
+  // This catches installations that vswhere doesn't find (older installs, custom paths)
+  const possibleMsvcPaths = [
+    // VS 2022 Build Tools
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC',
+    // VS 2022 editions
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Tools\\MSVC',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC',
+    // VS 2019
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools\\VC\\Tools\\MSVC',
+    'C:\\Program Files\\Microsoft Visual Studio\\2019\\BuildTools\\VC\\Tools\\MSVC',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC',
+    // VS 2017
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\BuildTools\\VC\\Tools\\MSVC',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Tools\\MSVC',
+  ]
+
+  for (const msvcPath of possibleMsvcPaths) {
+    if (checkMsvcPath(msvcPath)) {
+      return true
+    }
+  }
+
+  // Method 3: Try to run cl.exe directly (in case it's in PATH via Developer Command Prompt)
+  try {
+    await execAsync('where cl.exe', { timeout: 5000 })
+    return true
+  } catch {
+    // cl.exe not in PATH
+  }
+
+  return false
+}
+
+// Download and install Visual Studio Build Tools
+export async function installBuildTools(
+  onProgress: (progress: SetupProgress) => void
+): Promise<{ success: boolean; error?: string; requiresRestart?: boolean }> {
+  const resourcesPath = getResourcesPath()
+  const installerPath = path.join(resourcesPath, 'vs_buildtools.exe')
+
+  try {
+    // Create resources directory if it doesn't exist
+    if (!existsSync(resourcesPath)) {
+      mkdirSync(resourcesPath, { recursive: true })
+    }
+
+    onProgress({
+      stage: 'buildtools',
+      progress: 5,
+      details: 'Downloading Visual Studio Build Tools installer...'
+    })
+
+    // Download the Visual Studio Build Tools installer
+    const installerUrl = 'https://aka.ms/vs/17/release/vs_buildtools.exe'
+    
+    await new Promise<void>((resolve, reject) => {
+      downloadFile(installerUrl, installerPath, (downloaded, total) => {
+        const percent = total > 0 ? Math.round((downloaded / total) * 40) + 5 : 10
+        onProgress({
+          stage: 'buildtools',
+          progress: percent,
+          details: `Downloading installer... ${Math.round(downloaded / 1024 / 1024)}MB`
+        })
+      })
+        .then(() => resolve())
+        .catch(reject)
+    })
+
+    onProgress({
+      stage: 'buildtools',
+      progress: 50,
+      details: 'Installing Visual Studio Build Tools (this may take 10-20 minutes)...'
+    })
+
+    // Run the installer silently with C++ workload
+    // --quiet: no UI
+    // --wait: wait for installation to complete
+    // --norestart: don't restart automatically
+    // --add: add the C++ build tools workload
+    const installCmd = `"${installerPath}" --quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`
+
+    try {
+      await execAsync(installCmd, { 
+        timeout: 3600000, // 1 hour timeout for installation
+        maxBuffer: 1024 * 1024 * 10
+      })
+    } catch (installError) {
+      // The installer might return non-zero exit code even on success
+      // Check if build tools are now available
+      const installed = await checkBuildToolsAvailable()
+      if (!installed) {
+        // Check for common error codes
+        const errorMsg = (installError as Error).message
+        if (errorMsg.includes('3010')) {
+          // Exit code 3010 means success but requires restart
+          onProgress({
+            stage: 'buildtools',
+            progress: 100,
+            details: 'Build Tools installed! Computer restart required.'
+          })
+          return { success: true, requiresRestart: true }
+        }
+        throw installError
+      }
+    }
+
+    // Cleanup installer
+    try {
+      unlinkSync(installerPath)
+    } catch {
+      // Ignore cleanup errors
+    }
+
+    // Verify installation
+    onProgress({
+      stage: 'buildtools',
+      progress: 95,
+      details: 'Verifying installation...'
+    })
+
+    const installed = await checkBuildToolsAvailable()
+    if (!installed) {
+      return { 
+        success: false, 
+        error: 'Build Tools installation completed but compiler not found. Please restart your computer and try again.' 
+      }
+    }
+
+    onProgress({
+      stage: 'buildtools',
+      progress: 100,
+      details: 'Visual Studio Build Tools installed successfully!'
+    })
+
+    return { success: true }
+  } catch (error) {
+    // Cleanup on error
+    try {
+      if (existsSync(installerPath)) {
+        unlinkSync(installerPath)
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+    
+    return { success: false, error: (error as Error).message }
+  }
+}
+
 // Check if Silero venv is set up and working
 export function checkSileroInstalled(): boolean {
   const sileroPath = getSileroPath()
@@ -170,22 +372,48 @@ export async function checkRHVoiceCoreInstalled(): Promise<boolean> {
 // Get list of installed SAPI voices
 export async function getInstalledSAPIVoices(): Promise<string[]> {
   try {
+    // Query SAPI5 voices directly from registry (more reliable than System.Speech)
     const psScript = `
-Add-Type -AssemblyName System.Speech
-$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$voices = $synth.GetInstalledVoices()
-foreach ($voice in $voices) {
-  if ($voice.Enabled) {
-    Write-Output $voice.VoiceInfo.Name
+$voices = @()
+
+# Check 64-bit SAPI5 voices
+$path64 = 'HKLM:\\SOFTWARE\\Microsoft\\Speech\\Voices\\Tokens'
+if (Test-Path $path64) {
+  Get-ChildItem $path64 | ForEach-Object {
+    $name = (Get-ItemProperty $_.PSPath).'(default)'
+    if ($name) { $voices += $name }
   }
 }
-$synth.Dispose()
+
+# Check 32-bit SAPI5 voices (WoW6432Node)
+$path32 = 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Speech\\Voices\\Tokens'
+if (Test-Path $path32) {
+  Get-ChildItem $path32 | ForEach-Object {
+    $name = (Get-ItemProperty $_.PSPath).'(default)'
+    if ($name) { $voices += $name }
+  }
+}
+
+# Also check System.Speech as fallback
+try {
+  Add-Type -AssemblyName System.Speech
+  $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $synth.GetInstalledVoices() | ForEach-Object {
+    if ($_.Enabled) {
+      $voices += $_.VoiceInfo.Name
+    }
+  }
+  $synth.Dispose()
+} catch {}
+
+# Return unique voices
+$voices | Select-Object -Unique | ForEach-Object { Write-Output $_ }
 `
     const tempDir = app.getPath('temp')
     const scriptPath = path.join(tempDir, 'get_voices.ps1')
     fs.writeFileSync(scriptPath, psScript, 'utf-8')
     
-    const { stdout, stderr } = await execAsync(`powershell.exe -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 10000 })
+    const { stdout, stderr } = await execAsync(`powershell.exe -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 15000 })
     
     if (stderr) {
       console.error('PowerShell stderr:', stderr)
@@ -280,6 +508,7 @@ export function checkDependencies(): DependencyStatus {
     sileroAvailable: false, // Will be set by async check
     coqui: coquiInstalled,
     coquiAvailable: false, // Will be set by async check
+    coquiBuildToolsAvailable: false, // Will be set by async check
     rhvoiceCore: false, // Will be set by async check
     rhvoiceVoices: [], // Will be set by async check
     piperVoices: {
@@ -302,6 +531,9 @@ export async function checkDependenciesAsync(): Promise<DependencyStatus> {
   const pythonCmd = await checkPythonAvailable()
   status.sileroAvailable = pythonCmd !== null
   status.coquiAvailable = pythonCmd !== null
+  
+  // Check Build Tools for Coqui
+  status.coquiBuildToolsAvailable = await checkBuildToolsAvailable()
   
   // Check RHVoice
   status.rhvoiceVoices = await getInstalledRHVoices()
@@ -842,9 +1074,66 @@ if __name__ == '__main__':
 }
 
 // Install Coqui TTS (requires Python to be installed on system)
+
+// Find vcvarsall.bat path for setting up MSVC environment
+async function findVcvarsallPath(): Promise<string | null> {
+  // Helper to check for vcvarsall.bat
+  const checkVcvarsall = (basePath: string): string | null => {
+    const vcvarsallPath = path.join(basePath, 'VC', 'Auxiliary', 'Build', 'vcvarsall.bat')
+    if (existsSync(vcvarsallPath)) {
+      return vcvarsallPath
+    }
+    return null
+  }
+
+  // Method 1: Use vswhere to find VS installation
+  const vswherePaths = [
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe'
+  ]
+
+  for (const vswherePath of vswherePaths) {
+    if (existsSync(vswherePath)) {
+      try {
+        const { stdout } = await execAsync(
+          `"${vswherePath}" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`,
+          { timeout: 10000 }
+        )
+        if (stdout.trim()) {
+          const vcvarsall = checkVcvarsall(stdout.trim())
+          if (vcvarsall) return vcvarsall
+        }
+      } catch {
+        // Continue to fallback
+      }
+    }
+  }
+
+  // Method 2: Direct path check
+  const possibleVsPaths = [
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools',
+    'C:\\Program Files\\Microsoft Visual Studio\\2019\\BuildTools',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\BuildTools',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community',
+  ]
+
+  for (const vsPath of possibleVsPaths) {
+    const vcvarsall = checkVcvarsall(vsPath)
+    if (vcvarsall) return vcvarsall
+  }
+
+  return null
+}
+
 export async function installCoqui(
   onProgress: (progress: SetupProgress) => void
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> {
   const pythonCmd = await checkPythonAvailable()
 
   if (!pythonCmd) {
@@ -854,9 +1143,37 @@ export async function installCoqui(
     }
   }
 
+  // Check if Visual Studio Build Tools are available
+  const hasBuildTools = await checkBuildToolsAvailable()
+  
+  if (!hasBuildTools) {
+    return {
+      success: false,
+      needsBuildTools: true,
+      error: 'Visual Studio Build Tools are required for Coqui TTS installation.'
+    }
+  }
+
+  // Find vcvarsall.bat for setting up compiler environment
+  const vcvarsallPath = await findVcvarsallPath()
+  if (!vcvarsallPath) {
+    return {
+      success: false,
+      error: 'Could not find vcvarsall.bat. Please reinstall Visual Studio Build Tools with C++ workload.'
+    }
+  }
+
   const coquiPath = getCoquiPath()
   const venvPath = path.join(coquiPath, 'venv')
   const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+
+  // Helper function to run pip commands with MSVC environment
+  const runWithMsvcEnv = async (pipCommand: string, options: { timeout: number; maxBuffer: number }) => {
+    // Use cmd.exe to run vcvarsall.bat and then the pip command
+    // vcvarsall.bat x64 sets up the environment for 64-bit compilation
+    const fullCommand = `cmd.exe /c "call "${vcvarsallPath}" x64 >nul 2>&1 && ${pipCommand}"`
+    return execAsync(fullCommand, options)
+  }
 
   try {
     // Create coqui directory
@@ -895,17 +1212,58 @@ export async function installCoqui(
       maxBuffer: 1024 * 1024 * 10
     })
 
-    // Install Coqui TTS (includes PyTorch)
+    // Install PyTorch first with pre-built wheels (CPU version for smaller download)
     onProgress({
       stage: 'coqui',
       progress: 15,
-      details: 'Installing Coqui TTS (this may take several minutes, ~2GB download)...'
+      details: 'Installing PyTorch (~2GB download, this may take several minutes)...'
     })
 
-    await execAsync(
-      `"${venvPython}" -m pip install TTS --no-input`,
-      { timeout: 1200000, maxBuffer: 1024 * 1024 * 100 }
-    )
+    try {
+      // Install PyTorch CPU version from official index (pre-built, no compilation needed)
+      await execAsync(
+        `"${venvPython}" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-input`,
+        { timeout: 1200000, maxBuffer: 1024 * 1024 * 100 }
+      )
+    } catch (torchError) {
+      console.error('PyTorch installation error:', torchError)
+      return {
+        success: false,
+        error: 'Failed to install PyTorch. Please check your internet connection and try again.'
+      }
+    }
+
+    // Install Coqui TTS with MSVC environment
+    onProgress({
+      stage: 'coqui',
+      progress: 50,
+      details: 'Installing Coqui TTS dependencies...'
+    })
+
+    try {
+      // First install numpy and other dependencies with pre-built wheels
+      await execAsync(
+        `"${venvPython}" -m pip install numpy scipy --prefer-binary --no-input`,
+        { timeout: 300000, maxBuffer: 1024 * 1024 * 50 }
+      )
+
+      // Install TTS with MSVC environment for compiling native extensions
+      onProgress({
+        stage: 'coqui',
+        progress: 60,
+        details: 'Installing Coqui TTS package (compiling native extensions)...'
+      })
+
+      // Run pip install TTS with MSVC compiler environment
+      await runWithMsvcEnv(
+        `"${venvPython}" -m pip install TTS --no-input`,
+        { timeout: 1200000, maxBuffer: 1024 * 1024 * 100 }
+      )
+    } catch (ttsError) {
+      const errorMsg = (ttsError as Error).message
+      console.error('TTS installation error:', ttsError)
+      return { success: false, error: errorMsg }
+    }
 
     // Copy generate.py script
     onProgress({

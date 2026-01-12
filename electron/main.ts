@@ -4,7 +4,7 @@ import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
 import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders } from './services/tts'
-import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg } from './services/setup'
+import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools } from './services/setup'
 
 // Load environment variables from .env file
 config()
@@ -233,6 +233,25 @@ ipcMain.handle('install-silero', async (event) => {
 ipcMain.handle('install-coqui', async (event) => {
   try {
     const result = await installCoqui((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('check-build-tools', async () => {
+  try {
+    return await checkBuildToolsAvailable()
+  } catch (error) {
+    return false
+  }
+})
+
+ipcMain.handle('install-build-tools', async (event) => {
+  try {
+    const result = await installBuildTools((progress) => {
       event.sender.send('setup-progress', progress)
     })
     return result

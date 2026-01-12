@@ -108,6 +108,7 @@ function App() {
     fetchProviders()
   }, [])
   const [voices, setVoices] = useState<VoiceInfo[]>([])
+  const [isLoadingVoices, setIsLoadingVoices] = useState(true)
   const [selectedVoice, setSelectedVoice] = useState<string>('')
   const [selectedProvider, setSelectedProvider] = useState<string>('piper')
   const [availableProviders, setAvailableProviders] = useState<ProviderInfo[]>([])
@@ -146,8 +147,10 @@ function App() {
 
   // Coqui state
   const [coquiInstalled, setCoquiInstalled] = useState(false)
+  const [coquiBuildToolsAvailable, setCoquiBuildToolsAvailable] = useState(false)
   const [isInstallingCoqui, setIsInstallingCoqui] = useState(false)
   const [coquiInstallProgress, setCoquiInstallProgress] = useState('')
+  const [coquiInstallPercent, setCoquiInstallPercent] = useState(0)
 
   // Piper voice installation state
   const [installingVoice, setInstallingVoice] = useState<string | null>(null)
@@ -190,6 +193,7 @@ function App() {
         const deps = await window.electronAPI.checkDependenciesAsync()
         setSileroInstalled(deps.silero)
         setCoquiInstalled(deps.coqui)
+        setCoquiBuildToolsAvailable(deps.coquiBuildToolsAvailable)
         setPythonAvailable(deps.sileroAvailable || deps.coquiAvailable)
         setPiperInstalled(deps.piper)
         setFfmpegInstalled(deps.ffmpeg)
@@ -250,45 +254,79 @@ function App() {
       : <Moon className="h-5 w-5" />
   }
 
-  // Load voices when language or provider changes
+  // Load voices when language changes
   useEffect(() => {
     const loadVoices = async () => {
       if (!window.electronAPI) return
 
+      setIsLoadingVoices(true)
       try {
         const loadedVoices = await window.electronAPI.getVoices(language)
         setVoices(loadedVoices)
-
-        // Filter by provider
-        const filteredVoices = loadedVoices.filter((v: VoiceInfo) => v.provider === selectedProvider)
-
-        // For Piper and RHVoice, only select installed voices
-        if (selectedProvider === 'piper' || selectedProvider === 'rhvoice') {
-          const installedVoices = filteredVoices.filter((v: VoiceInfo) => v.isInstalled !== false)
-          if (installedVoices.length > 0) {
-            setSelectedVoice(installedVoices[0].shortName)
-          } else {
-            setSelectedVoice('') // No installed voices
-          }
-        } else if (filteredVoices.length > 0) {
-          // Default to first available voice in filtered list
-          setSelectedVoice(filteredVoices[0].shortName)
-        } else if (selectedProvider === 'silero' || selectedProvider === 'coqui') {
-          // Silero and Coqui may not have voices until dependencies are installed
-          // Don't reset provider, just clear voice selection
-          setSelectedVoice('')
-        } else if (loadedVoices.length > 0) {
-          // If no voices in selected provider, reset to all and select first
-          setSelectedProvider('all')
-          setSelectedVoice(loadedVoices[0].shortName)
-        }
       } catch (error) {
         console.error('Failed to load voices:', error)
+      } finally {
+        setIsLoadingVoices(false)
       }
     }
 
     loadVoices()
-  }, [language, selectedProvider, needsSetup, sileroInstalled, coquiInstalled])
+  }, [language, needsSetup, sileroInstalled, coquiInstalled, rhvoiceCoreInstalled, piperInstalled])
+
+  // Force refresh RHVoice voices when switching to rhvoice provider if no installed voices found
+  useEffect(() => {
+    if (selectedProvider !== 'rhvoice') return
+
+    const rhvoiceVoices = voices.filter(v => v.provider === 'rhvoice')
+    const hasInstalledRHVoices = rhvoiceVoices.some(v => v.isInstalled === true)
+
+    // If RHVoice is selected but no installed voices found, force refresh
+    if (rhvoiceVoices.length > 0 && !hasInstalledRHVoices) {
+      const refreshVoices = async () => {
+        if (!window.electronAPI) return
+
+        console.log('RHVoice selected but no installed voices found, forcing refresh...')
+        setIsLoadingVoices(true)
+        try {
+          const loadedVoices = await window.electronAPI.getVoices(language)
+          setVoices(loadedVoices)
+        } catch (error) {
+          console.error('Failed to refresh RHVoice voices:', error)
+        } finally {
+          setIsLoadingVoices(false)
+        }
+      }
+
+      refreshVoices()
+    }
+  }, [selectedProvider])
+
+  // Select default voice when provider changes or voices are loaded
+  useEffect(() => {
+    // Filter by provider
+    const providerVoices = voices.filter((v: VoiceInfo) => v.provider === selectedProvider)
+
+    // For Piper and RHVoice, only select installed voices
+    if (selectedProvider === 'piper' || selectedProvider === 'rhvoice') {
+      const installedVoices = providerVoices.filter((v: VoiceInfo) => v.isInstalled !== false)
+      if (installedVoices.length > 0) {
+        setSelectedVoice(installedVoices[0].shortName)
+      } else {
+        setSelectedVoice('') // No installed voices
+      }
+    } else if (providerVoices.length > 0) {
+      // Default to first available voice in filtered list
+      setSelectedVoice(providerVoices[0].shortName)
+    } else if (selectedProvider === 'silero' || selectedProvider === 'coqui') {
+      // Silero and Coqui may not have voices until dependencies are installed
+      // Don't reset provider, just clear voice selection
+      setSelectedVoice('')
+    } else if (voices.length > 0) {
+      // If no voices in selected provider, reset to all and select first
+      setSelectedProvider('all')
+      setSelectedVoice(voices[0].shortName)
+    }
+  }, [voices, selectedProvider])
 
   // Update preview text when language changes
   useEffect(() => {
@@ -581,33 +619,35 @@ function App() {
 
         {/* File Drop Zone */}
         <Card>
-          <CardContent className="py-4">
+          <CardContent className="py-6">
             {!file ? (
               <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer
+                className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer
                   ${isDragging ? 'border-primary bg-accent' : 'border-muted-foreground/25 hover:border-primary/50'}`}
                 onClick={handleFileSelect}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
               >
-                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                <p className="text-base font-medium mb-1">
+                <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-lg font-medium mb-2">
                   Drop your book here or click to browse
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   Supports FB2, EPUB, TXT
                 </p>
               </div>
             ) : (
-              <div className="flex items-center gap-3">
-                <Book className="h-8 w-8 text-primary flex-shrink-0" />
+              <div className="flex items-center gap-4">
+                <Book className="h-12 w-12 text-primary flex-shrink-0" />
                 <div className="flex-grow min-w-0">
-                  <h3 className="font-medium text-sm truncate">
+                  <h3 className="font-medium text-lg truncate">
                     {bookContent?.title || file.name}
-                    {bookContent?.author && <span className="text-muted-foreground font-normal"> — {bookContent.author}</span>}
                   </h3>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {bookContent?.author && (
+                    <p className="text-base text-muted-foreground truncate">{bookContent.author}</p>
+                  )}
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
                     <span className="uppercase">{file.extension}</span>
                     <span>•</span>
                     <span>{formatFileSize(file.size)}</span>
@@ -622,11 +662,11 @@ function App() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8"
+                  className="h-10 w-10"
                   onClick={clearFile}
                   disabled={isConverting}
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </Button>
               </div>
             )}
@@ -646,7 +686,7 @@ function App() {
               {/* Provider Selection */}
               <div className="space-y-3">
                 <Label className="text-sm">TTS Provider</Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="flex flex-wrap gap-2 lg:flex-nowrap">
                   {availableProviders.map(provider => {
                     const isAvailable = getProviderAvailability(provider.id)
                     const isSelected = selectedProvider === provider.id
@@ -655,7 +695,7 @@ function App() {
                         key={provider.id}
                         onClick={() => isAvailable && !isConverting && setSelectedProvider(provider.id)}
                         disabled={!isAvailable || isConverting}
-                        className={`flex flex-col items-center gap-1 border rounded-lg p-3 transition-colors ${
+                        className={`flex flex-col items-center gap-1 border rounded-lg p-3 transition-colors flex-1 min-w-[calc(50%-4px)] sm:min-w-0 ${
                           isSelected ? 'border-primary bg-accent' : 'border-border'
                         } ${
                           isAvailable && !isConverting ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
@@ -891,17 +931,42 @@ function App() {
                         {' '}and restart the application.
                       </p>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">
-                        Coqui needs to download XTTS-v2 model (~2.5GB). This is a one-time setup.
-                      </p>
-                      {isInstallingCoqui ? (
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm">{coquiInstallProgress || 'Installing...'}</span>
+                  ) : isInstallingCoqui ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">{coquiInstallProgress || 'Installing...'}</span>
+                          <span className="font-medium">{coquiInstallPercent}%</span>
                         </div>
-                      ) : (
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300 ease-out"
+                            style={{ width: `${coquiInstallPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Please wait, this may take several minutes...
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <p>For Coqui XTTS-v2 to work, the following will be installed:</p>
+                        <ul className="list-disc list-inside text-xs space-y-0.5 ml-1">
+                          {!coquiBuildToolsAvailable && (
+                            <li className="text-yellow-500">Visual Studio Build Tools — ~7 GB (required for compilation)</li>
+                          )}
+                          <li>Python virtual environment</li>
+                          <li>Coqui TTS library — ~500 MB</li>
+                          <li>XTTS-v2 model — ~1.8 GB</li>
+                        </ul>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          Total download: ~{coquiBuildToolsAvailable ? '2.5' : '9.5'} GB
+                          {!coquiBuildToolsAvailable && ' (includes Build Tools)'}
+                        </span>
                         <Button
                           variant="default"
                           size="sm"
@@ -909,16 +974,43 @@ function App() {
                             if (!window.electronAPI) return
                             setIsInstallingCoqui(true)
                             setCoquiInstallProgress('Starting installation...')
+                            setCoquiInstallPercent(0)
 
-                            const unsubscribe = window.electronAPI.onSetupProgress(({ details }) => {
+                            const unsubscribe = window.electronAPI.onSetupProgress(({ progress, details }) => {
                               setCoquiInstallProgress(details)
+                              setCoquiInstallPercent(progress)
                             })
 
                             try {
-                              const result = await window.electronAPI.installCoqui()
+                              let result = await window.electronAPI.installCoqui()
+
+                              // If Build Tools are needed, install them first
+                              if (result.needsBuildTools) {
+                                setCoquiInstallProgress('Installing Visual Studio Build Tools (this may take 10-20 minutes)...')
+                                setCoquiInstallPercent(0)
+
+                                const buildToolsResult = await window.electronAPI.installBuildTools()
+
+                                if (!buildToolsResult.success) {
+                                  setError(buildToolsResult.error || 'Failed to install Build Tools')
+                                  return
+                                }
+
+                                if (buildToolsResult.requiresRestart) {
+                                  setError('Build Tools installed successfully. Please restart your computer and try again.')
+                                  return
+                                }
+
+                                // Try installing Coqui again after Build Tools are installed
+                                setCoquiInstallProgress('Retrying Coqui installation...')
+                                setCoquiInstallPercent(0)
+                                result = await window.electronAPI.installCoqui()
+                              }
+
                               if (result.success) {
                                 setCoquiInstalled(true)
                                 setCoquiInstallProgress('')
+                                setCoquiInstallPercent(0)
                               } else {
                                 setError(result.error || 'Coqui installation failed')
                               }
@@ -933,7 +1025,7 @@ function App() {
                           <Download className="h-4 w-4 mr-2" />
                           Install Coqui
                         </Button>
-                      )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1146,7 +1238,16 @@ function App() {
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {filteredVoices.map(voice => {
+                        {isLoadingVoices ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                            <span className="ml-2 text-sm text-muted-foreground">Loading voices...</span>
+                          </div>
+                        ) : filteredVoices.length === 0 ? (
+                          <div className="py-4 text-center text-sm text-muted-foreground">
+                            No voices available
+                          </div>
+                        ) : filteredVoices.map(voice => {
                           const isPiper = selectedProvider === 'piper'
                           const isRHVoice = selectedProvider === 'rhvoice'
                           const isVoiceInstalled = voice.isInstalled !== false
