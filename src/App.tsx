@@ -7,6 +7,23 @@ import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2 } from 'lucide-react'
+
+// Gender icons as inline SVG components
+const MaleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="10" cy="14" r="5" />
+    <path d="M19 5l-5.4 5.4" />
+    <path d="M15 5h4v4" />
+  </svg>
+)
+
+const FemaleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="8" r="5" />
+    <path d="M12 13v8" />
+    <path d="M9 18h6" />
+  </svg>
+)
 import { SetupScreen } from '@/components/SetupScreen'
 
 interface BookContent {
@@ -154,7 +171,7 @@ function App() {
 
   // Piper voice installation state
   const [installingVoice, setInstallingVoice] = useState<string | null>(null)
-  const [voiceInstallProgress, setVoiceInstallProgress] = useState('')
+  const [voiceInstallProgress, setVoiceInstallProgress] = useState<number>(0)
   const [voiceSelectOpen, setVoiceSelectOpen] = useState(false)
 
   // RHVoice state
@@ -309,12 +326,23 @@ function App() {
     // For Piper and RHVoice, only select installed voices
     if (selectedProvider === 'piper' || selectedProvider === 'rhvoice') {
       const installedVoices = providerVoices.filter((v: VoiceInfo) => v.isInstalled !== false)
+      // Check if current selection is still valid (installed)
+      const currentVoiceValid = installedVoices.some((v: VoiceInfo) => v.shortName === selectedVoice)
+      if (currentVoiceValid) {
+        // Keep current selection
+        return
+      }
       if (installedVoices.length > 0) {
         setSelectedVoice(installedVoices[0].shortName)
       } else {
         setSelectedVoice('') // No installed voices
       }
     } else if (providerVoices.length > 0) {
+      // Check if current selection is still valid
+      const currentVoiceValid = providerVoices.some((v: VoiceInfo) => v.shortName === selectedVoice)
+      if (currentVoiceValid) {
+        return
+      }
       // Default to first available voice in filtered list
       setSelectedVoice(providerVoices[0].shortName)
     } else if (selectedProvider === 'silero' || selectedProvider === 'coqui') {
@@ -1231,7 +1259,7 @@ function App() {
                           {selectedVoice && (() => {
                             const voice = filteredVoices.find(v => v.shortName === selectedVoice)
                             if (voice) {
-                              return <span>{voice.gender === 'Male' ? '👨' : '👩'} {voice.name}</span>
+                              return <span className="flex items-center gap-1.5">{voice.gender === 'Male' ? <MaleIcon className="h-4 w-4" /> : <FemaleIcon className="h-4 w-4" />} {voice.name}</span>
                             }
                             return null
                           })()}
@@ -1271,8 +1299,8 @@ function App() {
                                   }
                                 }}
                               >
-                                <span>
-                                  {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                                <span className="flex items-center gap-1.5">
+                                  {voice.gender === 'Male' ? <MaleIcon className="h-4 w-4" /> : <FemaleIcon className="h-4 w-4" />} {voice.name}
                                 </span>
                                 {isVoiceInstalled ? null : isInstallingRH ? (
                                   <div className="relative w-6 h-6">
@@ -1361,23 +1389,47 @@ function App() {
                                   }
                                 }}
                               >
-                                <span>
-                                  {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                                <span className="flex items-center gap-1.5">
+                                  {voice.gender === 'Male' ? <MaleIcon className="h-4 w-4" /> : <FemaleIcon className="h-4 w-4" />} {voice.name}
                                 </span>
-                                {isVoiceInstalled ? null : (
+                                {isVoiceInstalled ? null : isInstallingPiper ? (
+                                  <div className="relative w-6 h-6">
+                                    <svg className="w-6 h-6 -rotate-90">
+                                      <circle
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        className="opacity-20"
+                                      />
+                                      <circle
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeDasharray={`${voiceInstallProgress * 0.628} 62.8`}
+                                        className="text-primary"
+                                      />
+                                    </svg>
+                                  </div>
+                                ) : (
                                   <button
                                     className="p-1 hover:bg-accent rounded disabled:opacity-50"
-                                    disabled={isInstallingPiper || installingVoice !== null}
+                                    disabled={installingVoice !== null}
                                     onClick={async (e) => {
                                       e.preventDefault()
                                       e.stopPropagation()
                                       if (!window.electronAPI) return
 
                                       setInstallingVoice(voice.shortName)
-                                      setVoiceInstallProgress('Starting...')
+                                      setVoiceInstallProgress(0)
 
-                                      const unsubscribe = window.electronAPI.onSetupProgress(({ details }) => {
-                                        setVoiceInstallProgress(details)
+                                      const unsubscribe = window.electronAPI.onSetupProgress(({ progress }) => {
+                                        setVoiceInstallProgress(progress)
                                       })
 
                                       try {
@@ -1404,16 +1456,12 @@ function App() {
                                         setError((err as Error).message)
                                       } finally {
                                         setInstallingVoice(null)
-                                        setVoiceInstallProgress('')
+                                        setVoiceInstallProgress(0)
                                         unsubscribe()
                                       }
                                     }}
                                   >
-                                    {isInstallingPiper ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Download className="h-4 w-4" />
-                                    )}
+                                    <Download className="h-4 w-4" />
                                   </button>
                                 )}
                               </div>
@@ -1422,7 +1470,9 @@ function App() {
 
                           return (
                             <SelectItem key={voice.shortName} value={voice.shortName}>
-                              {voice.gender === 'Male' ? '👨' : '👩'} {voice.name}
+                              <span className="flex items-center gap-1.5">
+                                {voice.gender === 'Male' ? <MaleIcon className="h-4 w-4" /> : <FemaleIcon className="h-4 w-4" />} {voice.name}
+                              </span>
                             </SelectItem>
                           )
                         })}
