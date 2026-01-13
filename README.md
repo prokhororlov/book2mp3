@@ -239,7 +239,6 @@ MIT
 
 - [RHVoice](https://github.com/RHVoice) - Quality SAPI voices
 - [Piper](https://github.com/rhasspy/piper) - Fast ONNX models
-- [Coqui TTS](https://github.com/coqui-ai/TTS) - XTTS-v2 voice cloning
 - [Silero](https://github.com/snakers4/silero-models) - Excellent PyTorch models
 - [ElevenLabs](https://elevenlabs.io/) - Premium cloud TTS
 - [FFmpeg](https://ffmpeg.org/) - Audio conversion

@@ -20,9 +20,6 @@ export interface DependencyStatus {
   ffmpeg: boolean
   silero: boolean
   sileroAvailable: boolean // true if Python is available for Silero setup
-  coqui: boolean
-  coquiAvailable: boolean // true if Python is available for Coqui setup
-  coquiBuildToolsAvailable: boolean // true if Visual Studio Build Tools are installed (required for Coqui)
   rhvoiceCore: boolean // true if RHVoice SAPI engine is installed
   rhvoiceVoices: string[] // list of installed RHVoice voice names
   piperVoices: {
@@ -51,11 +48,6 @@ export function getFfmpegPath(): string {
 export function getSileroPath(): string {
   return path.join(getResourcesPath(), 'silero')
 }
-
-export function getCoquiPath(): string {
-  return path.join(getResourcesPath(), 'coqui')
-}
-
 
 export function getRHVoicePath(): string {
   return path.join(getResourcesPath(), 'rhvoice')
@@ -340,20 +332,6 @@ export function checkSileroInstalled(): boolean {
   return pythonExists && scriptExists
 }
 
-// Check if Coqui venv is set up and working
-export function checkCoquiInstalled(): boolean {
-  const coquiPath = getCoquiPath()
-  const venvPython = path.join(coquiPath, 'venv', 'Scripts', 'python.exe')
-  const generateScript = path.join(coquiPath, 'generate.py')
-
-  const pythonExists = existsSync(venvPython)
-  const scriptExists = existsSync(generateScript)
-  console.log('Coqui check:', { coquiPath, venvPython, generateScript, pythonExists, scriptExists })
-
-  return pythonExists && scriptExists
-}
-
-
 // Check if RHVoice core is installed (checks if any RHVoice voice is in SAPI)
 export async function checkRHVoiceCoreInstalled(): Promise<boolean> {
   try {
@@ -498,17 +476,11 @@ export function checkDependencies(): DependencyStatus {
   // Check Silero
   const sileroInstalled = checkSileroInstalled()
 
-  // Check Coqui
-  const coquiInstalled = checkCoquiInstalled()
-
   return {
     piper: existsSync(piperExe),
     ffmpeg: existsSync(ffmpegExe),
     silero: sileroInstalled,
     sileroAvailable: false, // Will be set by async check
-    coqui: coquiInstalled,
-    coquiAvailable: false, // Will be set by async check
-    coquiBuildToolsAvailable: false, // Will be set by async check
     rhvoiceCore: false, // Will be set by async check
     rhvoiceVoices: [], // Will be set by async check
     piperVoices: {
@@ -530,11 +502,7 @@ export async function checkDependenciesAsync(): Promise<DependencyStatus> {
   const status = checkDependencies()
   const pythonCmd = await checkPythonAvailable()
   status.sileroAvailable = pythonCmd !== null
-  status.coquiAvailable = pythonCmd !== null
-  
-  // Check Build Tools for Coqui
-  status.coquiBuildToolsAvailable = await checkBuildToolsAvailable()
-  
+
   // Check RHVoice
   status.rhvoiceVoices = await getInstalledRHVoices()
   status.rhvoiceCore = status.rhvoiceVoices.length > 0 || await checkRHVoiceCoreInstalled()
@@ -1178,310 +1146,6 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-`
-}
-
-// Install Coqui TTS (requires Python to be installed on system)
-
-// Find vcvarsall.bat path for setting up MSVC environment
-async function findVcvarsallPath(): Promise<string | null> {
-  // Helper to check for vcvarsall.bat
-  const checkVcvarsall = (basePath: string): string | null => {
-    const vcvarsallPath = path.join(basePath, 'VC', 'Auxiliary', 'Build', 'vcvarsall.bat')
-    if (existsSync(vcvarsallPath)) {
-      return vcvarsallPath
-    }
-    return null
-  }
-
-  // Method 1: Use vswhere to find VS installation
-  const vswherePaths = [
-    'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe',
-    'C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe'
-  ]
-
-  for (const vswherePath of vswherePaths) {
-    if (existsSync(vswherePath)) {
-      try {
-        const { stdout } = await execAsync(
-          `"${vswherePath}" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`,
-          { timeout: 10000 }
-        )
-        if (stdout.trim()) {
-          const vcvarsall = checkVcvarsall(stdout.trim())
-          if (vcvarsall) return vcvarsall
-        }
-      } catch {
-        // Continue to fallback
-      }
-    }
-  }
-
-  // Method 2: Direct path check
-  const possibleVsPaths = [
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools',
-    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools',
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community',
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional',
-    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise',
-    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools',
-    'C:\\Program Files\\Microsoft Visual Studio\\2019\\BuildTools',
-    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community',
-    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\BuildTools',
-    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community',
-  ]
-
-  for (const vsPath of possibleVsPaths) {
-    const vcvarsall = checkVcvarsall(vsPath)
-    if (vcvarsall) return vcvarsall
-  }
-
-  return null
-}
-
-export async function installCoqui(
-  onProgress: (progress: SetupProgress) => void
-): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> {
-  const pythonCmd = await checkPythonAvailable()
-
-  if (!pythonCmd) {
-    return {
-      success: false,
-      error: 'Python 3 is not installed. Please install Python 3.9+ from python.org'
-    }
-  }
-
-  // Check if Visual Studio Build Tools are available
-  const hasBuildTools = await checkBuildToolsAvailable()
-  
-  if (!hasBuildTools) {
-    return {
-      success: false,
-      needsBuildTools: true,
-      error: 'Visual Studio Build Tools are required for Coqui TTS installation.'
-    }
-  }
-
-  // Find vcvarsall.bat for setting up compiler environment
-  const vcvarsallPath = await findVcvarsallPath()
-  if (!vcvarsallPath) {
-    return {
-      success: false,
-      error: 'Could not find vcvarsall.bat. Please reinstall Visual Studio Build Tools with C++ workload.'
-    }
-  }
-
-  const coquiPath = getCoquiPath()
-  const venvPath = path.join(coquiPath, 'venv')
-  const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
-
-  // Helper function to run pip commands with MSVC environment
-  const runWithMsvcEnv = async (pipCommand: string, options: { timeout: number; maxBuffer: number }) => {
-    // Use cmd.exe to run vcvarsall.bat and then the pip command
-    // vcvarsall.bat x64 sets up the environment for 64-bit compilation
-    const fullCommand = `cmd.exe /c "call "${vcvarsallPath}" x64 >nul 2>&1 && ${pipCommand}"`
-    return execAsync(fullCommand, options)
-  }
-
-  try {
-    // Create coqui directory
-    if (!existsSync(coquiPath)) {
-      mkdirSync(coquiPath, { recursive: true })
-    }
-
-    // Create voices directory
-    const voicesPath = path.join(coquiPath, 'voices')
-    if (!existsSync(voicesPath)) {
-      mkdirSync(voicesPath, { recursive: true })
-    }
-
-    // Create virtual environment
-    onProgress({
-      stage: 'coqui',
-      progress: 5,
-      details: 'Creating Python virtual environment...'
-    })
-
-    await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
-
-    if (!existsSync(venvPython)) {
-      return { success: false, error: 'Failed to create virtual environment' }
-    }
-
-    // Upgrade pip
-    onProgress({
-      stage: 'coqui',
-      progress: 10,
-      details: 'Upgrading pip...'
-    })
-
-    await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
-      timeout: 120000,
-      maxBuffer: 1024 * 1024 * 10
-    })
-
-    // Install PyTorch first with pre-built wheels (CPU version for smaller download)
-    onProgress({
-      stage: 'coqui',
-      progress: 15,
-      details: 'Installing PyTorch (~2GB download, this may take several minutes)...'
-    })
-
-    try {
-      // Install PyTorch CPU version from official index (pre-built, no compilation needed)
-      await execAsync(
-        `"${venvPython}" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-input`,
-        { timeout: 1200000, maxBuffer: 1024 * 1024 * 100 }
-      )
-    } catch (torchError) {
-      console.error('PyTorch installation error:', torchError)
-      return {
-        success: false,
-        error: 'Failed to install PyTorch. Please check your internet connection and try again.'
-      }
-    }
-
-    // Install Coqui TTS with MSVC environment
-    onProgress({
-      stage: 'coqui',
-      progress: 50,
-      details: 'Installing Coqui TTS dependencies...'
-    })
-
-    try {
-      // First install numpy and other dependencies with pre-built wheels
-      await execAsync(
-        `"${venvPython}" -m pip install numpy scipy --prefer-binary --no-input`,
-        { timeout: 300000, maxBuffer: 1024 * 1024 * 50 }
-      )
-
-      // Install TTS with MSVC environment for compiling native extensions
-      onProgress({
-        stage: 'coqui',
-        progress: 60,
-        details: 'Installing Coqui TTS package (compiling native extensions)...'
-      })
-
-      // Run pip install TTS with MSVC compiler environment
-      await runWithMsvcEnv(
-        `"${venvPython}" -m pip install TTS --no-input`,
-        { timeout: 1200000, maxBuffer: 1024 * 1024 * 100 }
-      )
-    } catch (ttsError) {
-      const errorMsg = (ttsError as Error).message
-      console.error('TTS installation error:', ttsError)
-      return { success: false, error: errorMsg }
-    }
-
-    // Copy generate.py script
-    onProgress({
-      stage: 'coqui',
-      progress: 85,
-      details: 'Setting up generation script...'
-    })
-
-    const generateScript = getCoquiGenerateScriptContent()
-    fs.writeFileSync(path.join(coquiPath, 'generate.py'), generateScript, 'utf-8')
-
-    // Verify installation
-    onProgress({
-      stage: 'coqui',
-      progress: 90,
-      details: 'Verifying installation...'
-    })
-
-    const { stdout } = await execAsync(`"${venvPython}" -c "from TTS.api import TTS; print('OK')"`, { timeout: 60000 })
-
-    if (!stdout.includes('OK')) {
-      return { success: false, error: 'Coqui TTS verification failed' }
-    }
-
-    // Pre-download XTTS-v2 model
-    onProgress({
-      stage: 'coqui',
-      progress: 92,
-      details: 'Pre-downloading XTTS-v2 model (~1.8GB, this may take a while)...'
-    })
-
-    // Set environment variable to agree to ToS and trigger model download
-    // Use a temporary Python file instead of -c to avoid Windows quote escaping issues
-    const preloadScript = `import os
-os.environ["COQUI_TOS_AGREED"] = "1"
-from TTS.api import TTS
-tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-print("Model downloaded successfully")
-`
-    const preloadScriptPath = path.join(coquiPath, 'preload_model.py')
-    fs.writeFileSync(preloadScriptPath, preloadScript, 'utf-8')
-
-    try {
-      await execAsync(`"${venvPython}" "${preloadScriptPath}"`, {
-        timeout: 1800000, // 30 minutes for model download
-        maxBuffer: 1024 * 1024 * 100
-      })
-    } finally {
-      // Clean up temporary script
-      try { fs.unlinkSync(preloadScriptPath) } catch {}
-    }
-
-    onProgress({
-      stage: 'coqui',
-      progress: 100,
-      details: 'Coqui TTS installation complete!'
-    })
-
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-}
-
-// Generate.py script content for Coqui XTTS-v2
-function getCoquiGenerateScriptContent(): string {
-  return `#!/usr/bin/env python3
-"""Coqui XTTS-v2 TTS Generation Script with built-in speakers"""
-
-import argparse
-import os
-import sys
-from pathlib import Path
-
-os.environ["COQUI_TOS_AGREED"] = "1"
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--text', required=True)
-    parser.add_argument('--speaker', required=True, help='Built-in speaker name (e.g., "Claribel Dervla")')
-    parser.add_argument('--language', required=True)
-    parser.add_argument('--output', required=True)
-    args = parser.parse_args()
-
-    import torch
-    from TTS.api import TTS
-
-    # Normalize language code (app uses ru-RU, XTTS uses ru)
-    lang = args.language.lower()
-    if lang in ['ru-ru', 'ru_ru']:
-        lang = 'ru'
-    elif lang in ['en-us', 'en-gb', 'en_us', 'en_gb', 'en']:
-        lang = 'en'
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-
-    tts.tts_to_file(
-        text=args.text,
-        speaker=args.speaker,
-        language=lang,
-        file_path=args.output
-    )
-
-    print(f"Audio saved to {args.output}")
-
-if __name__ == "__main__":
-    main()
 `
 }
 

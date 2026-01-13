@@ -22,7 +22,7 @@ interface VoiceInfo {
   shortName: string
   gender: 'Male' | 'Female'
   locale: string
-  provider: 'system' | 'piper' | 'silero' | 'elevenlabs' | 'coqui' | 'rhvoice'
+  provider: 'system' | 'piper' | 'silero' | 'elevenlabs' | 'rhvoice'
   modelPath?: string
   voiceId?: string
   isInstalled?: boolean
@@ -58,9 +58,6 @@ interface DependencyStatus {
   ffmpeg: boolean
   silero: boolean
   sileroAvailable: boolean
-  coqui: boolean
-  coquiAvailable: boolean
-  coquiBuildToolsAvailable: boolean
   rhvoiceCore: boolean
   rhvoiceVoices: string[]
   piperVoices: {
@@ -91,7 +88,6 @@ interface ElectronAPI {
   checkDependenciesAsync: () => Promise<DependencyStatus>
   checkPythonAvailable: () => Promise<boolean>
   installSilero: () => Promise<{ success: boolean; error?: string }>
-  installCoqui: () => Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }>
   checkBuildTools: () => Promise<boolean>
   installBuildTools: () => Promise<{ success: boolean; error?: string; requiresRestart?: boolean }>
   installPiperVoice: (lang: 'ru_RU' | 'en_US', voiceName: string, quality: string) => Promise<{ success: boolean; error?: string }>

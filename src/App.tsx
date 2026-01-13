@@ -6,7 +6,7 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, AlertTriangle, Settings } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 // Gender icons as inline SVG components
@@ -46,7 +46,7 @@ interface VoiceInfo {
   shortName: string
   gender: 'Male' | 'Female'
   locale: string
-  provider: 'system' | 'piper' | 'silero' | 'elevenlabs' | 'coqui' | 'rhvoice'
+  provider: 'system' | 'piper' | 'silero' | 'elevenlabs' | 'rhvoice'
   isInstalled?: boolean
 }
 
@@ -73,10 +73,6 @@ const LANGUAGES = [
   { code: 'en', name: 'English' },
 ]
 
-// Feature flags
-// Set to true to enable Coqui XTTS-v2 in production builds
-const COQUI_ENABLED = import.meta.env.DEV // || true
-
 // Provider icons mapping
 const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   system: <Zap className="h-4 w-4" />,
@@ -84,7 +80,6 @@ const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   piper: <Cpu className="h-4 w-4" />,
   silero: <Sparkles className="h-4 w-4" />,
   elevenlabs: <Cloud className="h-4 w-4" />,
-  coqui: <Wand2 className="h-4 w-4" />,
 }
 
 function App() {
@@ -113,8 +108,7 @@ function App() {
       if (!window.electronAPI) return
       try {
         const providers = await window.electronAPI.getAvailableProviders()
-        const filteredProviders = providers.filter(p => COQUI_ENABLED || p.id !== 'coqui')
-        const providersWithIcons: ProviderInfo[] = filteredProviders.map(p => ({
+        const providersWithIcons: ProviderInfo[] = providers.map(p => ({
           ...p,
           icon: PROVIDER_ICONS[p.id] || <Cpu className="h-4 w-4" />
         }))
@@ -164,13 +158,6 @@ function App() {
   const [sileroInstallProgress, setSileroInstallProgress] = useState('')
   const [sileroInstallPercent, setSileroInstallPercent] = useState(0)
 
-  // Coqui state
-  const [coquiInstalled, setCoquiInstalled] = useState(false)
-  const [coquiBuildToolsAvailable, setCoquiBuildToolsAvailable] = useState(false)
-  const [isInstallingCoqui, setIsInstallingCoqui] = useState(false)
-  const [coquiInstallProgress, setCoquiInstallProgress] = useState('')
-  const [coquiInstallPercent, setCoquiInstallPercent] = useState(0)
-
   // Piper voice installation state
   const [installingVoice, setInstallingVoice] = useState<string | null>(null)
   const [voiceInstallProgress, setVoiceInstallProgress] = useState<number>(0)
@@ -211,9 +198,7 @@ function App() {
       try {
         const deps = await window.electronAPI.checkDependenciesAsync()
         setSileroInstalled(deps.silero)
-        setCoquiInstalled(deps.coqui)
-        setCoquiBuildToolsAvailable(deps.coquiBuildToolsAvailable)
-        setPythonAvailable(deps.sileroAvailable || deps.coquiAvailable)
+        setPythonAvailable(deps.sileroAvailable)
         setPiperInstalled(deps.piper)
         setFfmpegInstalled(deps.ffmpeg)
         setRhvoiceCoreInstalled(deps.rhvoiceCore)
@@ -290,7 +275,7 @@ function App() {
     }
 
     loadVoices()
-  }, [language, needsSetup, sileroInstalled, coquiInstalled, rhvoiceCoreInstalled, piperInstalled])
+  }, [language, needsSetup, sileroInstalled, rhvoiceCoreInstalled, piperInstalled])
 
   // Force refresh RHVoice voices when switching to rhvoice provider if no installed voices found
   useEffect(() => {
@@ -347,8 +332,8 @@ function App() {
       }
       // Default to first available voice in filtered list
       setSelectedVoice(providerVoices[0].shortName)
-    } else if (selectedProvider === 'silero' || selectedProvider === 'coqui') {
-      // Silero and Coqui may not have voices until dependencies are installed
+    } else if (selectedProvider === 'silero') {
+      // Silero may not have voices until dependencies are installed
       // Don't reset provider, just clear voice selection
       setSelectedVoice('')
     } else if (voices.length > 0) {
@@ -593,8 +578,8 @@ function App() {
 
   // Check which providers have voices for current language
   const getProviderAvailability = (providerId: string) => {
-    // Silero and Coqui should always be selectable (they show setup screen if not installed)
-    if (providerId === 'silero' || providerId === 'coqui') {
+    // Silero should always be selectable (it shows setup screen if not installed)
+    if (providerId === 'silero') {
       return true
     }
     return voices.some(v => v.provider === providerId)
@@ -608,8 +593,6 @@ function App() {
     switch (selectedProvider) {
       case 'silero':
         return sileroInstalled
-      case 'coqui':
-        return coquiInstalled
       case 'elevenlabs':
         return hasApiKey
       case 'piper':
@@ -630,7 +613,7 @@ function App() {
   })()
 
   // Check if any installation is in progress
-  const isAnyInstallationInProgress = isInstallingSilero || isInstallingCoqui || isInstallingPiperCore || isInstallingRHVoiceCore || installingVoice !== null || installingRHVoice !== null
+  const isAnyInstallationInProgress = isInstallingSilero || isInstallingPiperCore || isInstallingRHVoiceCore || installingVoice !== null || installingRHVoice !== null
 
   // Show loading while checking setup status
   if (needsSetup === null) {
@@ -949,131 +932,6 @@ function App() {
                         >
                           <Download className="h-4 w-4 mr-2" />
                           Install Silero
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Coqui Setup Notice */}
-              {selectedProvider === 'coqui' && !coquiInstalled && (
-                <div className="space-y-2 p-3 border rounded-md bg-muted/50">
-                  <div className="flex items-center gap-2">
-                    <Wand2 className="h-4 w-4 text-primary" />
-                    <span className="font-medium text-sm">Coqui XTTS-v2 Setup Required</span>
-                  </div>
-                  {!pythonAvailable ? (
-                    <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">
-                        Coqui requires Python 3.9+ to be installed on your system.
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Download Python from{' '}
-                        <a
-                          href="https://www.python.org/downloads/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline hover:text-foreground"
-                        >
-                          python.org
-                        </a>
-                        {' '}and restart the application.
-                      </p>
-                    </div>
-                  ) : isInstallingCoqui ? (
-                    <div className="space-y-3">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">{coquiInstallProgress || 'Installing...'}</span>
-                          <span className="font-medium">{coquiInstallPercent}%</span>
-                        </div>
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all duration-300 ease-out"
-                            style={{ width: `${coquiInstallPercent}%` }}
-                          />
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Please wait, this may take several minutes...
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="text-sm text-muted-foreground space-y-1">
-                        <p>For Coqui XTTS-v2 to work, the following will be installed:</p>
-                        <ul className="list-disc list-inside text-xs space-y-0.5 ml-1">
-                          {!coquiBuildToolsAvailable && (
-                            <li className="text-yellow-500">Visual Studio Build Tools — ~7 GB (required for compilation)</li>
-                          )}
-                          <li>Python virtual environment</li>
-                          <li>Coqui TTS library — ~500 MB</li>
-                          <li>XTTS-v2 model — ~1.8 GB</li>
-                        </ul>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-muted-foreground">
-                          Total download: ~{coquiBuildToolsAvailable ? '2.5' : '9.5'} GB
-                          {!coquiBuildToolsAvailable && ' (includes Build Tools)'}
-                        </span>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={async () => {
-                            if (!window.electronAPI) return
-                            setIsInstallingCoqui(true)
-                            setCoquiInstallProgress('Starting installation...')
-                            setCoquiInstallPercent(0)
-
-                            const unsubscribe = window.electronAPI.onSetupProgress(({ progress, details }) => {
-                              setCoquiInstallProgress(details)
-                              setCoquiInstallPercent(progress)
-                            })
-
-                            try {
-                              let result = await window.electronAPI.installCoqui()
-
-                              // If Build Tools are needed, install them first
-                              if (result.needsBuildTools) {
-                                setCoquiInstallProgress('Installing Visual Studio Build Tools (this may take 10-20 minutes)...')
-                                setCoquiInstallPercent(0)
-
-                                const buildToolsResult = await window.electronAPI.installBuildTools()
-
-                                if (!buildToolsResult.success) {
-                                  setError(buildToolsResult.error || 'Failed to install Build Tools')
-                                  return
-                                }
-
-                                if (buildToolsResult.requiresRestart) {
-                                  setError('Build Tools installed successfully. Please restart your computer and try again.')
-                                  return
-                                }
-
-                                // Try installing Coqui again after Build Tools are installed
-                                setCoquiInstallProgress('Retrying Coqui installation...')
-                                setCoquiInstallPercent(0)
-                                result = await window.electronAPI.installCoqui()
-                              }
-
-                              if (result.success) {
-                                setCoquiInstalled(true)
-                                setCoquiInstallProgress('')
-                                setCoquiInstallPercent(0)
-                              } else {
-                                setError(result.error || 'Coqui installation failed')
-                              }
-                            } catch (err) {
-                              setError((err as Error).message)
-                            } finally {
-                              setIsInstallingCoqui(false)
-                              unsubscribe()
-                            }
-                          }}
-                        >
-                          <Download className="h-4 w-4 mr-2" />
-                          Install Coqui
                         </Button>
                       </div>
                     </div>
