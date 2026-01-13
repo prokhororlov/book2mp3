@@ -1277,7 +1277,7 @@ function App() {
                       }}
                       disabled={!isProviderReady || isConverting || installingVoice !== null || installingRHVoice !== null}
                     >
-                      <SelectTrigger className="flex-1 h-9">
+                      <SelectTrigger className="flex-1 h-9" showChevron={installingVoice === null && installingRHVoice === null}>
                         <SelectValue placeholder={
                           !isProviderReady ? "Setup required" : "Select voice"
                         }>
@@ -1289,6 +1289,31 @@ function App() {
                             return null
                           })()}
                         </SelectValue>
+                        {(installingVoice !== null || installingRHVoice !== null) && (
+                          <div className="relative w-4 h-4 flex-shrink-0">
+                            <svg className="w-4 h-4 -rotate-90">
+                              <circle
+                                cx="8"
+                                cy="8"
+                                r="6"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                className="opacity-20"
+                              />
+                              <circle
+                                cx="8"
+                                cy="8"
+                                r="6"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeDasharray={`${(installingVoice !== null ? voiceInstallProgress : rhvoiceInstallProgress) * 0.377} 37.7`}
+                                className="text-primary"
+                              />
+                            </svg>
+                          </div>
+                        )}
                       </SelectTrigger>
                       <SelectContent>
                         {isLoadingVoices ? (
