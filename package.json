@@ -21,7 +21,8 @@
     "setup:silero": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-silero.ps1",
     "release": "node scripts/release.cjs",
     "release:minor": "node scripts/release.cjs minor",
-    "release:major": "node scripts/release.cjs major"
+    "release:major": "node scripts/release.cjs major",
+    "clean:tts": "scripts\\clean-tts.bat"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.0",

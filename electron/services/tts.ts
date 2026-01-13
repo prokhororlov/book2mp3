@@ -3,11 +3,11 @@ import path from 'path'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { app } from 'electron'
-import { checkSileroInstalled, getInstalledRHVoices } from './setup'
+import { checkSileroInstalled, checkCoquiInstalled, getInstalledRHVoices } from './setup'
 
 const execAsync = promisify(exec)
 
-export type TTSProvider = 'rhvoice' | 'piper' | 'silero' | 'elevenlabs'
+export type TTSProvider = 'rhvoice' | 'piper' | 'silero' | 'elevenlabs' | 'coqui'
 
 export interface VoiceInfo {
   name: string
@@ -134,6 +134,42 @@ const ELEVENLABS_VOICES: Record<string, VoiceInfo[]> = {
   ]
 }
 
+// Coqui XTTS-v2 voice configurations (built-in speakers)
+const COQUI_VOICES: Record<string, VoiceInfo[]> = {
+  'ru-RU': [
+    { name: 'Claribel Dervla', shortName: 'coqui-claribel', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Claribel Dervla' },
+    { name: 'Daisy Studious', shortName: 'coqui-daisy', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Daisy Studious' },
+    { name: 'Gracie Wise', shortName: 'coqui-gracie', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Gracie Wise' },
+    { name: 'Tammie Ema', shortName: 'coqui-tammie', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Tammie Ema' },
+    { name: 'Alison Dietlinde', shortName: 'coqui-alison', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Alison Dietlinde' },
+    { name: 'Ana Florence', shortName: 'coqui-ana', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Ana Florence' },
+    { name: 'Annmarie Nele', shortName: 'coqui-annmarie', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Annmarie Nele' },
+    { name: 'Asya Anara', shortName: 'coqui-asya', gender: 'Female', locale: 'ru-RU', provider: 'coqui', modelPath: 'Asya Anara' },
+    { name: 'Andrew Chipper', shortName: 'coqui-andrew', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Andrew Chipper' },
+    { name: 'Badr Odhiambo', shortName: 'coqui-badr', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Badr Odhiambo' },
+    { name: 'Dionisio Schuyler', shortName: 'coqui-dionisio', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Dionisio Schuyler' },
+    { name: 'Royston Min', shortName: 'coqui-royston', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Royston Min' },
+    { name: 'Viktor Eka', shortName: 'coqui-viktor', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Viktor Eka' },
+    { name: 'Abrahan Mack', shortName: 'coqui-abrahan', gender: 'Male', locale: 'ru-RU', provider: 'coqui', modelPath: 'Abrahan Mack' },
+  ],
+  'en': [
+    { name: 'Claribel Dervla', shortName: 'coqui-claribel-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Claribel Dervla' },
+    { name: 'Daisy Studious', shortName: 'coqui-daisy-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Daisy Studious' },
+    { name: 'Gracie Wise', shortName: 'coqui-gracie-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Gracie Wise' },
+    { name: 'Tammie Ema', shortName: 'coqui-tammie-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Tammie Ema' },
+    { name: 'Alison Dietlinde', shortName: 'coqui-alison-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Alison Dietlinde' },
+    { name: 'Ana Florence', shortName: 'coqui-ana-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Ana Florence' },
+    { name: 'Annmarie Nele', shortName: 'coqui-annmarie-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Annmarie Nele' },
+    { name: 'Asya Anara', shortName: 'coqui-asya-en', gender: 'Female', locale: 'en', provider: 'coqui', modelPath: 'Asya Anara' },
+    { name: 'Andrew Chipper', shortName: 'coqui-andrew-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Andrew Chipper' },
+    { name: 'Badr Odhiambo', shortName: 'coqui-badr-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Badr Odhiambo' },
+    { name: 'Dionisio Schuyler', shortName: 'coqui-dionisio-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Dionisio Schuyler' },
+    { name: 'Royston Min', shortName: 'coqui-royston-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Royston Min' },
+    { name: 'Viktor Eka', shortName: 'coqui-viktor-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Viktor Eka' },
+    { name: 'Abrahan Mack', shortName: 'coqui-abrahan-en', gender: 'Male', locale: 'en', provider: 'coqui', modelPath: 'Abrahan Mack' },
+  ]
+}
+
 // ElevenLabs API key storage
 let elevenLabsApiKey: string | null = null
 
@@ -185,6 +221,11 @@ export async function getVoicesForLanguage(language: string, provider?: TTSProvi
     allVoices = allVoices.concat(ELEVENLABS_VOICES[language] || [])
   }
 
+  // Coqui XTTS-v2 requires Python environment to be set up
+  if ((!provider || provider === 'coqui') && checkCoquiInstalled()) {
+    allVoices = allVoices.concat(COQUI_VOICES[language] || [])
+  }
+
   if (allVoices.length === 0) {
     throw new Error(`Language ${language} is not supported`)
   }
@@ -220,6 +261,12 @@ export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; 
       requiresSetup: true
     },
     {
+      id: 'coqui',
+      name: 'Coqui XTTS-v2',
+      description: 'Продвинутая мультиязычная модель с 55+ встроенными голосами. Высочайшее качество синтеза, поддержка множества языков. Требует ~4GB места и GPU для ускорения.',
+      requiresSetup: true
+    },
+    {
       id: 'elevenlabs',
       name: 'ElevenLabs',
       description: 'Премиум облачный сервис с передовыми технологиями синтеза. Превосходное качество, возможность клонирования голоса. Требует API-ключ и подключение к интернету.',
@@ -240,6 +287,8 @@ export function isProviderAvailableForLanguage(provider: TTSProvider, language: 
       return SILERO_VOICES[language] !== undefined
     case 'elevenlabs':
       return ELEVENLABS_VOICES[language] !== undefined
+    case 'coqui':
+      return COQUI_VOICES[language] !== undefined
     default:
       return false
   }
@@ -275,6 +324,17 @@ function getSileroPythonExecutable(): string {
 function getSileroScript(): string {
   const resourcesPath = getResourcesPath()
   return path.join(resourcesPath, 'silero', 'generate.py')
+}
+
+// Coqui XTTS-v2 path helpers
+function getCoquiPythonExecutable(): string {
+  const resourcesPath = getResourcesPath()
+  return path.join(resourcesPath, 'coqui', 'venv', 'Scripts', 'python.exe')
+}
+
+function getCoquiScript(): string {
+  const resourcesPath = getResourcesPath()
+  return path.join(resourcesPath, 'coqui', 'generate.py')
 }
 
 // Clean text for TTS
@@ -533,6 +593,65 @@ async function generateSpeechWithSilero(
   })
 }
 
+// ============= Coqui XTTS-v2 Implementation =============
+async function generateSpeechWithCoqui(
+  text: string,
+  speakerName: string,
+  language: string,
+  outputPath: string
+): Promise<void> {
+  const pythonExe = getCoquiPythonExecutable()
+  const coquiScript = getCoquiScript()
+
+  if (!fs.existsSync(pythonExe)) {
+    throw new Error('Coqui Python environment not found. Please run setup.')
+  }
+
+  if (!fs.existsSync(coquiScript)) {
+    throw new Error('Coqui generation script not found.')
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const args = [
+      coquiScript,
+      '--text', text,
+      '--speaker', speakerName,
+      '--language', language,
+      '--output', outputPath
+    ]
+
+    const coquiProcess = spawn(pythonExe, args)
+    let stderr = ''
+    let stdout = ''
+
+    coquiProcess.stdout?.on('data', (data) => {
+      stdout += data.toString()
+    })
+
+    coquiProcess.stderr?.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    coquiProcess.on('error', (error) => {
+      reject(new Error(`Failed to start Coqui: ${error.message}`))
+    })
+
+    coquiProcess.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Coqui exited with code ${code}: ${stderr}`))
+        return
+      }
+
+      if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+        reject(new Error('Coqui failed to generate audio file'))
+        return
+      }
+
+      resolve()
+    })
+  })
+}
+
 // ============= ElevenLabs Implementation =============
 async function generateSpeechWithElevenLabs(
   text: string,
@@ -654,6 +773,13 @@ async function processChunk(
           await generateSpeechWithElevenLabs(chunk, voiceInfo.voiceId, tempFile, options)
           break
 
+        case 'coqui':
+          if (!voiceInfo.modelPath) {
+            throw new Error('Speaker name required for Coqui')
+          }
+          await generateSpeechWithCoqui(chunk, voiceInfo.modelPath, voiceInfo.locale, tempFile)
+          break
+
         default:
           throw new Error(`Unknown provider: ${voiceInfo.provider}`)
       }
@@ -693,7 +819,8 @@ export async function convertToSpeech(
     ...Object.values(RHVOICE_VOICES).flat(),
     ...Object.values(PIPER_VOICES).flat(),
     ...Object.values(SILERO_VOICES).flat(),
-    ...Object.values(ELEVENLABS_VOICES).flat()
+    ...Object.values(ELEVENLABS_VOICES).flat(),
+    ...Object.values(COQUI_VOICES).flat()
   ]
 
   voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
@@ -702,9 +829,9 @@ export async function convertToSpeech(
     throw new Error(`Voice not found: ${voiceShortName}`)
   }
 
-  // Silero has token limits in the positional encoder.
+  // Silero and Coqui have token limits in the positional encoder.
   // Cyrillic/non-Latin text expands to more tokens, so use smaller chunks.
-  const maxChunkLength = voiceInfo.provider === 'silero' ? 500 : 1000
+  const maxChunkLength = (voiceInfo.provider === 'silero' || voiceInfo.provider === 'coqui') ? 500 : 1000
   const chunks = splitIntoChunks(text, maxChunkLength)
 
   if (chunks.length === 0) {
@@ -899,7 +1026,8 @@ export async function previewVoice(
     ...Object.values(RHVOICE_VOICES).flat(),
     ...Object.values(PIPER_VOICES).flat(),
     ...Object.values(SILERO_VOICES).flat(),
-    ...Object.values(ELEVENLABS_VOICES).flat()
+    ...Object.values(ELEVENLABS_VOICES).flat(),
+    ...Object.values(COQUI_VOICES).flat()
   ]
 
   const voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
@@ -946,6 +1074,13 @@ export async function previewVoice(
           return { success: false, error: 'Voice ID required for ElevenLabs' }
         }
         await generateSpeechWithElevenLabs(text, voiceInfo.voiceId, tempWavFile, options)
+        break
+
+      case 'coqui':
+        if (!voiceInfo.modelPath) {
+          return { success: false, error: 'Speaker name required for Coqui' }
+        }
+        await generateSpeechWithCoqui(text, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
         break
 
       default:

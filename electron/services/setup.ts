@@ -4,10 +4,208 @@ import https from 'https'
 import http from 'http'
 import { app } from 'electron'
 import { createWriteStream, existsSync, mkdirSync, statSync, unlinkSync, rmSync } from 'fs'
-import { exec } from 'child_process'
+import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
+
+
+// Interface for pip progress tracking
+interface PipProgressInfo {
+  phase: 'collecting' | 'downloading' | 'installing' | 'processing'
+  package: string
+  downloaded?: number
+  total?: number
+  percentage?: number
+}
+
+// Run pip install with real-time progress tracking
+async function runPipWithProgress(
+  pythonPath: string,
+  packages: string,
+  options: {
+    indexUrl?: string
+    timeout?: number
+    msvcEnvPath?: string // Path to vcvarsall.bat for MSVC environment
+    extraArgs?: string[] // Additional pip arguments like --prefer-binary
+    onProgress?: (info: PipProgressInfo) => void
+    onOutput?: (line: string) => void
+  } = {}
+): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    let command: string
+    let spawnArgs: string[]
+    
+    // Note: --progress-bar was removed in newer pip versions, pip shows progress by default
+    const pipArgs = ['pip', 'install', '--no-input']
+    
+    if (options.indexUrl) {
+      pipArgs.push('--index-url', options.indexUrl)
+    }
+    
+    if (options.extraArgs) {
+      pipArgs.push(...options.extraArgs)
+    }
+    
+    // Add packages (split by space, filter out empty strings)
+    pipArgs.push(...packages.split(' ').filter(p => p.trim()))
+    
+    if (options.msvcEnvPath) {
+      // Run pip within MSVC environment
+      command = 'cmd.exe'
+      const pipCommand = `"${pythonPath}" -m ${pipArgs.join(' ')}`
+      spawnArgs = ['/c', `call "${options.msvcEnvPath}" x64 >nul 2>&1 && ${pipCommand}`]
+      console.log('[runPipWithProgress] MSVC command:', spawnArgs.join(' '))
+    } else {
+      command = pythonPath
+      spawnArgs = ['-m', ...pipArgs]
+      console.log('[runPipWithProgress] command:', command, spawnArgs.join(' '))
+    }
+
+    const proc = spawn(command, spawnArgs, {
+      shell: true, // Always use shell for proper command parsing
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    })
+    
+    let lastPackage = ''
+    let stderr = ''
+    
+    const parseProgressLine = (line: string) => {
+      // pip progress format: "Downloading package-1.0.0.whl (123.4 MB)" or percentage updates
+      // Also: "Downloading torch-2.0.0+cpu... 50%|█████     | 123/246 [00:30<00:30, 4.0MB/s]"
+      
+      if (options.onOutput) {
+        options.onOutput(line)
+      }
+      
+      // Match "Collecting package"
+      const collectMatch = line.match(/Collecting\s+(\S+)/)
+      if (collectMatch) {
+        lastPackage = collectMatch[1].split('[')[0].split('>')[0].split('<')[0].split('=')[0]
+        options.onProgress?.({
+          phase: 'collecting',
+          package: lastPackage
+        })
+        return
+      }
+      
+      // Match "Downloading package (size)"
+      const downloadStartMatch = line.match(/Downloading\s+(\S+)/)
+      if (downloadStartMatch) {
+        lastPackage = downloadStartMatch[1].split('-')[0]
+        options.onProgress?.({
+          phase: 'downloading',
+          package: lastPackage
+        })
+        return
+      }
+      
+      // Match percentage progress: "50%|" or just percentage in download
+      const percentMatch = line.match(/(\d+)%\|/)
+      if (percentMatch) {
+        options.onProgress?.({
+          phase: 'downloading',
+          package: lastPackage,
+          percentage: parseInt(percentMatch[1], 10)
+        })
+        return
+      }
+      
+      // Match download size progress: "123.4/456.7 MB" or "123/456 kB"
+      const sizeMatch = line.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*(MB|kB|GB)/i)
+      if (sizeMatch) {
+        const multiplier = sizeMatch[3].toLowerCase() === 'gb' ? 1024 : sizeMatch[3].toLowerCase() === 'mb' ? 1 : 0.001
+        const downloaded = parseFloat(sizeMatch[1]) * multiplier
+        const total = parseFloat(sizeMatch[2]) * multiplier
+        options.onProgress?.({
+          phase: 'downloading',
+          package: lastPackage,
+          downloaded,
+          total,
+          percentage: Math.round((downloaded / total) * 100)
+        })
+        return
+      }
+      
+      // Match "Installing collected packages"
+      if (line.includes('Installing collected packages')) {
+        options.onProgress?.({
+          phase: 'installing',
+          package: lastPackage
+        })
+        return
+      }
+      
+      // Match "Successfully installed"
+      if (line.includes('Successfully installed')) {
+        options.onProgress?.({
+          phase: 'processing',
+          package: 'complete',
+          percentage: 100
+        })
+        return
+      }
+      
+      // Match "Building wheel" for compilation progress
+      const buildMatch = line.match(/Building wheel for (\S+)/)
+      if (buildMatch) {
+        lastPackage = buildMatch[1]
+        options.onProgress?.({
+          phase: 'processing',
+          package: lastPackage
+        })
+        return
+      }
+    }
+    
+    // Buffer for incomplete lines
+    let stdoutBuffer = ''
+    let stderrBuffer = ''
+    
+    proc.stdout?.on('data', (data: Buffer) => {
+      stdoutBuffer += data.toString()
+      const lines = stdoutBuffer.split(/\r?\n/)
+      stdoutBuffer = lines.pop() || ''
+      lines.forEach(parseProgressLine)
+    })
+    
+    proc.stderr?.on('data', (data: Buffer) => {
+      const str = data.toString()
+      stderr += str
+      stderrBuffer += str
+      const lines = stderrBuffer.split(/\r?\n/)
+      stderrBuffer = lines.pop() || ''
+      // pip often outputs progress to stderr
+      lines.forEach(parseProgressLine)
+    })
+    
+    const timeout = options.timeout || 600000
+    const timeoutId = setTimeout(() => {
+      proc.kill()
+      resolve({ success: false, error: `Installation timeout after ${timeout / 1000} seconds` })
+    }, timeout)
+    
+    proc.on('close', (code) => {
+      clearTimeout(timeoutId)
+      // Process remaining buffer
+      if (stdoutBuffer) parseProgressLine(stdoutBuffer)
+      if (stderrBuffer) parseProgressLine(stderrBuffer)
+
+      if (code === 0) {
+        resolve({ success: true })
+      } else {
+        console.error('[runPipWithProgress] pip failed with code:', code)
+        console.error('[runPipWithProgress] stderr:', stderr.slice(-2000)) // Last 2000 chars
+        resolve({ success: false, error: stderr || `pip exited with code ${code}` })
+      }
+    })
+    
+    proc.on('error', (err) => {
+      clearTimeout(timeoutId)
+      resolve({ success: false, error: err.message })
+    })
+  })
+}
 
 export interface SetupProgress {
   stage: string
@@ -20,6 +218,9 @@ export interface DependencyStatus {
   ffmpeg: boolean
   silero: boolean
   sileroAvailable: boolean // true if Python is available for Silero setup
+  coqui: boolean
+  coquiAvailable: boolean // true if Python is available for Coqui setup
+  coquiBuildToolsAvailable: boolean // true if Visual Studio Build Tools are installed
   rhvoiceCore: boolean // true if RHVoice SAPI engine is installed
   rhvoiceVoices: string[] // list of installed RHVoice voice names
   piperVoices: {
@@ -47,6 +248,10 @@ export function getFfmpegPath(): string {
 
 export function getSileroPath(): string {
   return path.join(getResourcesPath(), 'silero')
+}
+
+export function getCoquiPath(): string {
+  return path.join(getResourcesPath(), 'coqui')
 }
 
 export function getRHVoicePath(): string {
@@ -332,6 +537,19 @@ export function checkSileroInstalled(): boolean {
   return pythonExists && scriptExists
 }
 
+// Check if Coqui venv is set up and working
+export function checkCoquiInstalled(): boolean {
+  const coquiPath = getCoquiPath()
+  const venvPython = path.join(coquiPath, 'venv', 'Scripts', 'python.exe')
+  const generateScript = path.join(coquiPath, 'generate.py')
+
+  const pythonExists = existsSync(venvPython)
+  const scriptExists = existsSync(generateScript)
+  console.log('Coqui check:', { coquiPath, venvPython, generateScript, pythonExists, scriptExists })
+
+  return pythonExists && scriptExists
+}
+
 // Check if RHVoice core is installed (checks if any RHVoice voice is in SAPI)
 export async function checkRHVoiceCoreInstalled(): Promise<boolean> {
   try {
@@ -476,11 +694,17 @@ export function checkDependencies(): DependencyStatus {
   // Check Silero
   const sileroInstalled = checkSileroInstalled()
 
+  // Check Coqui
+  const coquiInstalled = checkCoquiInstalled()
+
   return {
     piper: existsSync(piperExe),
     ffmpeg: existsSync(ffmpegExe),
     silero: sileroInstalled,
     sileroAvailable: false, // Will be set by async check
+    coqui: coquiInstalled,
+    coquiAvailable: false, // Will be set by async check
+    coquiBuildToolsAvailable: false, // Will be set by async check
     rhvoiceCore: false, // Will be set by async check
     rhvoiceVoices: [], // Will be set by async check
     piperVoices: {
@@ -502,6 +726,10 @@ export async function checkDependenciesAsync(): Promise<DependencyStatus> {
   const status = checkDependencies()
   const pythonCmd = await checkPythonAvailable()
   status.sileroAvailable = pythonCmd !== null
+  status.coquiAvailable = pythonCmd !== null
+
+  // Check Build Tools for Coqui
+  status.coquiBuildToolsAvailable = await checkBuildToolsAvailable()
 
   // Check RHVoice
   status.rhvoiceVoices = await getInstalledRHVoices()
@@ -545,6 +773,11 @@ async function downloadFile(
       const totalSize = parseInt(response.headers['content-length'] || '0', 10)
       let downloadedSize = 0
 
+      // Throttle progress updates to avoid UI flickering
+      let lastProgressUpdate = 0
+      const PROGRESS_THROTTLE_MS = 100 // Update at most every 100ms
+      let lastReportedPercent = -1
+
       // Ensure directory exists
       const dir = path.dirname(destPath)
       if (!existsSync(dir)) {
@@ -583,8 +816,21 @@ async function downloadFile(
       response.on('data', (chunk: Buffer) => {
         downloadedSize += chunk.length
         resetTimeout() // Reset timeout on each chunk
+        
         if (onProgress && totalSize > 0) {
-          onProgress(downloadedSize, totalSize)
+          const now = Date.now()
+          const currentPercent = Math.round((downloadedSize / totalSize) * 100)
+          
+          // Only update if enough time passed OR if percentage changed by at least 1%
+          // Always update at 100%
+          if (
+            downloadedSize >= totalSize ||
+            (now - lastProgressUpdate >= PROGRESS_THROTTLE_MS && currentPercent !== lastReportedPercent)
+          ) {
+            lastProgressUpdate = now
+            lastReportedPercent = currentPercent
+            onProgress(downloadedSize, totalSize)
+          }
         }
       })
 
@@ -593,6 +839,10 @@ async function downloadFile(
       fileStream.on('finish', () => {
         clearTimeoutHandler()
         fileStream.close()
+        // Final progress update to ensure we report 100%
+        if (onProgress && totalSize > 0) {
+          onProgress(totalSize, totalSize)
+        }
         resolve()
       })
 
@@ -918,59 +1168,155 @@ export async function installSilero(
       mkdirSync(sileroPath, { recursive: true })
     }
 
-    // Create virtual environment
-    onProgress({
-      stage: 'silero',
-      progress: 10,
-      details: 'Creating Python virtual environment...'
-    })
-
-    await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
-
-    if (!existsSync(venvPython)) {
-      return { success: false, error: 'Failed to create virtual environment' }
+    // Clean up incomplete venv if exists but python is missing
+    if (existsSync(venvPath) && !existsSync(venvPython)) {
+      console.log('[installSilero] Removing incomplete venv...')
+      rmSync(venvPath, { recursive: true, force: true })
     }
 
-    // Upgrade pip
+    // Create virtual environment if not exists
+    if (!existsSync(venvPython)) {
+      onProgress({
+        stage: 'silero',
+        progress: 5,
+        details: 'Creating Python virtual environment...'
+      })
+
+      await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+
+      if (!existsSync(venvPython)) {
+        return { success: false, error: 'Failed to create virtual environment' }
+      }
+
+      // Upgrade pip only for fresh venv
+      onProgress({
+        stage: 'silero',
+        progress: 10,
+        details: 'Upgrading pip...'
+      })
+
+      await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+        timeout: 120000,
+        maxBuffer: 1024 * 1024 * 10
+      })
+    } else {
+      onProgress({
+        stage: 'silero',
+        progress: 10,
+        details: 'Using existing virtual environment...'
+      })
+    }
+
+    // Install PyTorch CPU - this is the longest step (10% to 75%)
+    // PyTorch is ~200MB, torchaudio is ~5MB
     onProgress({
       stage: 'silero',
-      progress: 20,
-      details: 'Upgrading pip...'
+      progress: 15,
+      details: 'Downloading PyTorch (this may take several minutes)...'
     })
 
-    await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
-      timeout: 120000,
-      maxBuffer: 1024 * 1024 * 10
-    })
-
-    // Install PyTorch CPU
-    onProgress({
-      stage: 'silero',
-      progress: 30,
-      details: 'Installing PyTorch (this may take several minutes)...'
-    })
-
-    await execAsync(
-      `"${venvPython}" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-input`,
-      { timeout: 600000, maxBuffer: 1024 * 1024 * 50 }
+    const pytorchResult = await runPipWithProgress(
+      venvPython,
+      'torch torchaudio',
+      {
+        indexUrl: 'https://download.pytorch.org/whl/cpu',
+        timeout: 600000,
+        onProgress: (info) => {
+          // Map pip progress to our 15-75% range for PyTorch installation
+          const baseProgress = 15
+          const rangeSize = 60 // 15% to 75%
+          
+          let subProgress = 0
+          if (info.phase === 'collecting') {
+            subProgress = 0
+          } else if (info.phase === 'downloading') {
+            // Downloading is 0-80% of the subprocess
+            subProgress = (info.percentage || 0) * 0.8
+          } else if (info.phase === 'installing') {
+            subProgress = 85
+          } else if (info.phase === 'processing') {
+            subProgress = 100
+          }
+          
+          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
+          
+          let details = 'Installing PyTorch...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            if (info.downloaded !== undefined && info.total !== undefined) {
+              details = `Downloading ${info.package}: ${info.downloaded.toFixed(1)}/${info.total.toFixed(1)} MB (${info.percentage}%)`
+            } else {
+              details = `Downloading ${info.package}: ${info.percentage}%`
+            }
+          } else if (info.phase === 'collecting') {
+            details = `Resolving dependencies: ${info.package}...`
+          } else if (info.phase === 'installing') {
+            details = 'Installing downloaded packages...'
+          }
+          
+          onProgress({
+            stage: 'silero',
+            progress: totalProgress,
+            details
+          })
+        }
+      }
     )
 
-    // Install additional dependencies
+    if (!pytorchResult.success) {
+      return { success: false, error: pytorchResult.error || 'Failed to install PyTorch' }
+    }
+
+    // Install additional dependencies (75% to 90%)
     onProgress({
       stage: 'silero',
-      progress: 80,
+      progress: 75,
       details: 'Installing additional dependencies...'
     })
 
-    await execAsync(`"${venvPython}" -m pip install omegaconf numpy scipy --no-input`, {
-      timeout: 180000,
-      maxBuffer: 1024 * 1024 * 10
-    })
+    const depsResult = await runPipWithProgress(
+      venvPython,
+      'omegaconf numpy scipy',
+      {
+        timeout: 180000,
+        onProgress: (info) => {
+          const baseProgress = 75
+          const rangeSize = 15 // 75% to 90%
+          
+          let subProgress = 0
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            subProgress = info.percentage * 0.8
+          } else if (info.phase === 'installing') {
+            subProgress = 85
+          } else if (info.phase === 'processing') {
+            subProgress = 100
+          }
+          
+          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
+          
+          let details = 'Installing dependencies...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            details = `Downloading ${info.package}: ${info.percentage}%`
+          } else if (info.phase === 'collecting') {
+            details = `Resolving: ${info.package}...`
+          }
+          
+          onProgress({
+            stage: 'silero',
+            progress: totalProgress,
+            details
+          })
+        }
+      }
+    )
+
+    if (!depsResult.success) {
+      return { success: false, error: depsResult.error || 'Failed to install dependencies' }
+    }
 
     // Copy generate.py script
     onProgress({
       stage: 'silero',
-      progress: 90,
+      progress: 92,
       details: 'Setting up generation script...'
     })
 
@@ -980,7 +1326,7 @@ export async function installSilero(
     // Verify installation
     onProgress({
       stage: 'silero',
-      progress: 95,
+      progress: 96,
       details: 'Verifying installation...'
     })
 
@@ -1146,6 +1492,513 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+`
+}
+
+// Find vcvarsall.bat path for setting up MSVC environment
+async function findVcvarsallPath(): Promise<string | null> {
+  const checkVcvarsall = (basePath: string): string | null => {
+    const vcvarsallPath = path.join(basePath, 'VC', 'Auxiliary', 'Build', 'vcvarsall.bat')
+    if (existsSync(vcvarsallPath)) {
+      return vcvarsallPath
+    }
+    return null
+  }
+
+  const vswherePaths = [
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe',
+    'C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe'
+  ]
+
+  for (const vswherePath of vswherePaths) {
+    if (existsSync(vswherePath)) {
+      try {
+        const { stdout } = await execAsync(
+          `"${vswherePath}" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`,
+          { timeout: 10000 }
+        )
+        if (stdout.trim()) {
+          const vcvarsall = checkVcvarsall(stdout.trim())
+          if (vcvarsall) return vcvarsall
+        }
+      } catch {
+        // Continue to fallback
+      }
+    }
+  }
+
+  const possibleVsPaths = [
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional',
+    'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools',
+    'C:\\Program Files\\Microsoft Visual Studio\\2019\\BuildTools',
+  ]
+
+  for (const vsPath of possibleVsPaths) {
+    const vcvarsall = checkVcvarsall(vsPath)
+    if (vcvarsall) return vcvarsall
+  }
+
+  return null
+}
+
+// Install Coqui TTS (requires Python and Visual Studio Build Tools)
+export async function installCoqui(
+  onProgress: (progress: SetupProgress) => void
+): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> {
+  const pythonCmd = await checkPythonAvailable()
+
+  if (!pythonCmd) {
+    return {
+      success: false,
+      error: 'Python 3 is not installed. Please install Python 3.9+ from python.org'
+    }
+  }
+
+  const hasBuildTools = await checkBuildToolsAvailable()
+
+  if (!hasBuildTools) {
+    return {
+      success: false,
+      needsBuildTools: true,
+      error: 'Visual Studio Build Tools are required for Coqui TTS installation.'
+    }
+  }
+
+  const vcvarsallPath = await findVcvarsallPath()
+  if (!vcvarsallPath) {
+    return {
+      success: false,
+      error: 'Could not find vcvarsall.bat. Please reinstall Visual Studio Build Tools with C++ workload.'
+    }
+  }
+
+  const coquiPath = getCoquiPath()
+  const venvPath = path.join(coquiPath, 'venv')
+  const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+
+  try {
+    if (!existsSync(coquiPath)) {
+      mkdirSync(coquiPath, { recursive: true })
+    }
+
+    const voicesPath = path.join(coquiPath, 'voices')
+    if (!existsSync(voicesPath)) {
+      mkdirSync(voicesPath, { recursive: true })
+    }
+
+    // Clean up incomplete venv if exists but python is missing
+    if (existsSync(venvPath) && !existsSync(venvPython)) {
+      console.log('[installCoqui] Removing incomplete venv...')
+      rmSync(venvPath, { recursive: true, force: true })
+    }
+
+    // Create virtual environment if not exists
+    if (!existsSync(venvPython)) {
+      onProgress({
+        stage: 'coqui',
+        progress: 2,
+        details: 'Creating Python virtual environment...'
+      })
+
+      await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+
+      if (!existsSync(venvPython)) {
+        return { success: false, error: 'Failed to create virtual environment' }
+      }
+
+      // Upgrade pip only for fresh venv
+      onProgress({
+        stage: 'coqui',
+        progress: 5,
+        details: 'Upgrading pip...'
+      })
+
+      await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+        timeout: 120000,
+        maxBuffer: 1024 * 1024 * 10
+      })
+    } else {
+      onProgress({
+        stage: 'coqui',
+        progress: 5,
+        details: 'Using existing virtual environment...'
+      })
+    }
+
+    // Install PyTorch CPU - range 5% to 40%
+    onProgress({
+      stage: 'coqui',
+      progress: 8,
+      details: 'Downloading PyTorch (~200MB)...'
+    })
+
+    const pytorchResult = await runPipWithProgress(
+      venvPython,
+      'torch torchaudio',
+      {
+        indexUrl: 'https://download.pytorch.org/whl/cpu',
+        timeout: 1200000,
+        onProgress: (info) => {
+          const baseProgress = 8
+          const rangeSize = 32 // 8% to 40%
+          
+          let subProgress = 0
+          if (info.phase === 'collecting') {
+            subProgress = 0
+          } else if (info.phase === 'downloading') {
+            subProgress = (info.percentage || 0) * 0.85
+          } else if (info.phase === 'installing') {
+            subProgress = 90
+          } else if (info.phase === 'processing') {
+            subProgress = 100
+          }
+          
+          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
+          
+          let details = 'Installing PyTorch...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            if (info.downloaded !== undefined && info.total !== undefined) {
+              details = `Downloading ${info.package}: ${info.downloaded.toFixed(1)}/${info.total.toFixed(1)} MB (${info.percentage}%)`
+            } else {
+              details = `Downloading ${info.package}: ${info.percentage}%`
+            }
+          } else if (info.phase === 'collecting') {
+            details = `Resolving dependencies: ${info.package}...`
+          } else if (info.phase === 'installing') {
+            details = 'Installing downloaded packages...'
+          }
+          
+          onProgress({
+            stage: 'coqui',
+            progress: totalProgress,
+            details
+          })
+        }
+      }
+    )
+
+    if (!pytorchResult.success) {
+      console.error('PyTorch installation error:', pytorchResult.error)
+      return {
+        success: false,
+        error: 'Failed to install PyTorch. Please check your internet connection and try again.'
+      }
+    }
+
+    // Install numpy, scipy - range 40% to 50%
+    onProgress({
+      stage: 'coqui',
+      progress: 42,
+      details: 'Installing numpy, scipy...'
+    })
+
+    const depsResult = await runPipWithProgress(
+      venvPython,
+      'numpy scipy',
+      {
+        timeout: 300000,
+        extraArgs: ['--prefer-binary'],
+        onProgress: (info) => {
+          const baseProgress = 42
+          const rangeSize = 8
+          
+          let subProgress = (info.percentage || 0)
+          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
+          
+          let details = 'Installing dependencies...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            details = `Downloading ${info.package}: ${info.percentage}%`
+          }
+          
+          onProgress({
+            stage: 'coqui',
+            progress: totalProgress,
+            details
+          })
+        }
+      }
+    )
+
+    if (!depsResult.success) {
+      console.error('Dependencies installation error:', depsResult.error)
+      return { success: false, error: depsResult.error }
+    }
+
+    // Install Coqui TTS with MSVC - range 50% to 80%
+    onProgress({
+      stage: 'coqui',
+      progress: 50,
+      details: 'Installing Coqui TTS (downloading and compiling)...'
+    })
+
+    const ttsResult = await runPipWithProgress(
+      venvPython,
+      'TTS',
+      {
+        timeout: 1200000,
+        msvcEnvPath: vcvarsallPath,
+        onProgress: (info) => {
+          const baseProgress = 50
+          const rangeSize = 30 // 50% to 80%
+          
+          let subProgress = 0
+          if (info.phase === 'collecting') {
+            subProgress = 5
+          } else if (info.phase === 'downloading') {
+            subProgress = 10 + (info.percentage || 0) * 0.5
+          } else if (info.phase === 'processing') {
+            // Building/compiling takes significant time
+            subProgress = 70
+          } else if (info.phase === 'installing') {
+            subProgress = 95
+          }
+          
+          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
+          
+          let details = 'Installing Coqui TTS...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            details = `Downloading ${info.package}: ${info.percentage}%`
+          } else if (info.phase === 'collecting') {
+            details = `Resolving: ${info.package}...`
+          } else if (info.phase === 'processing') {
+            details = `Compiling ${info.package}...`
+          } else if (info.phase === 'installing') {
+            details = 'Installing compiled packages...'
+          }
+          
+          onProgress({
+            stage: 'coqui',
+            progress: totalProgress,
+            details
+          })
+        }
+      }
+    )
+
+    if (!ttsResult.success) {
+      console.error('TTS installation error:', ttsResult.error)
+      return { success: false, error: ttsResult.error }
+    }
+
+    // Fix transformers compatibility issue with Coqui TTS
+    // Newer transformers removed BeamSearchScorer which TTS needs
+    onProgress({
+      stage: 'coqui',
+      progress: 80,
+      details: 'Fixing transformers compatibility...'
+    })
+
+    await execAsync(`"${venvPython}" -m pip install "transformers>=4.33.0,<4.40.0" --no-input`, {
+      timeout: 180000,
+      maxBuffer: 1024 * 1024 * 10
+    })
+
+    onProgress({
+      stage: 'coqui',
+      progress: 82,
+      details: 'Setting up generation script...'
+    })
+
+    const generateScript = getCoquiGenerateScriptContent()
+    fs.writeFileSync(path.join(coquiPath, 'generate.py'), generateScript, 'utf-8')
+
+    onProgress({
+      stage: 'coqui',
+      progress: 85,
+      details: 'Verifying installation...'
+    })
+
+    // Small delay to let filesystem sync after pip install
+    await new Promise(resolve => setTimeout(resolve, 2000))
+
+    // Retry verification a few times in case of timing issues
+    let verifySuccess = false
+    let lastError = ''
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { stdout } = await execAsync(`"${venvPython}" -c "from TTS.api import TTS; print('OK')"`, { timeout: 60000 })
+        if (stdout.includes('OK')) {
+          verifySuccess = true
+          break
+        }
+        lastError = 'TTS import did not return OK'
+      } catch (err) {
+        lastError = (err as Error).message
+        console.log(`[installCoqui] Verification attempt ${attempt} failed: ${lastError}`)
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        }
+      }
+    }
+
+    if (!verifySuccess) {
+      return { success: false, error: `Coqui TTS verification failed: ${lastError}` }
+    }
+
+    // Pre-download XTTS-v2 model - range 85% to 100%
+    onProgress({
+      stage: 'coqui',
+      progress: 87,
+      details: 'Pre-downloading XTTS-v2 model (~1.8GB)...'
+    })
+
+    const preloadScript = `import os
+import sys
+os.environ["COQUI_TOS_AGREED"] = "1"
+
+# Simple progress tracking for model download
+class ProgressTracker:
+    def __init__(self):
+        self.last_percent = -1
+    
+    def update(self, current, total):
+        if total > 0:
+            percent = int((current / total) * 100)
+            if percent != self.last_percent and percent % 5 == 0:
+                self.last_percent = percent
+                print(f"PROGRESS:{percent}", flush=True)
+
+from TTS.api import TTS
+tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+print("Model downloaded successfully")
+`
+    const preloadScriptPath = path.join(coquiPath, 'preload_model.py')
+    fs.writeFileSync(preloadScriptPath, preloadScript, 'utf-8')
+
+    try {
+      // Run model download with progress tracking
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(venvPython, [preloadScriptPath], {
+          shell: true,
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        })
+        
+        let stderr = ''
+        
+        proc.stdout?.on('data', (data: Buffer) => {
+          const lines = data.toString().split('\n')
+          for (const line of lines) {
+            const match = line.match(/PROGRESS:(\d+)/)
+            if (match) {
+              const modelPercent = parseInt(match[1], 10)
+              // Map model download progress to 87-98%
+              const totalProgress = 87 + Math.round(modelPercent * 0.11)
+              onProgress({
+                stage: 'coqui',
+                progress: totalProgress,
+                details: `Downloading XTTS-v2 model: ${modelPercent}%`
+              })
+            }
+            if (line.includes('Model downloaded successfully')) {
+              onProgress({
+                stage: 'coqui',
+                progress: 98,
+                details: 'Model download complete!'
+              })
+            }
+          }
+        })
+        
+        proc.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString()
+          // TTS library outputs download progress to stderr
+          const progressMatch = data.toString().match(/(\d+)%\|/)
+          if (progressMatch) {
+            const modelPercent = parseInt(progressMatch[1], 10)
+            const totalProgress = 87 + Math.round(modelPercent * 0.11)
+            onProgress({
+              stage: 'coqui',
+              progress: totalProgress,
+              details: `Downloading XTTS-v2 model: ${modelPercent}%`
+            })
+          }
+        })
+        
+        const timeout = setTimeout(() => {
+          proc.kill()
+          reject(new Error('Model download timeout'))
+        }, 1800000)
+        
+        proc.on('close', (code) => {
+          clearTimeout(timeout)
+          if (code === 0) {
+            resolve()
+          } else {
+            reject(new Error(stderr || `Model download failed with code ${code}`))
+          }
+        })
+        
+        proc.on('error', (err) => {
+          clearTimeout(timeout)
+          reject(err)
+        })
+      })
+    } finally {
+      try { unlinkSync(preloadScriptPath) } catch {}
+    }
+
+    onProgress({
+      stage: 'coqui',
+      progress: 100,
+      details: 'Coqui TTS installation complete!'
+    })
+
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+}
+
+// Generate.py script content for Coqui XTTS-v2
+function getCoquiGenerateScriptContent(): string {
+  return `#!/usr/bin/env python3
+"""Coqui XTTS-v2 TTS Generation Script with built-in speakers"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+os.environ["COQUI_TOS_AGREED"] = "1"
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--text', required=True)
+    parser.add_argument('--speaker', required=True, help='Built-in speaker name (e.g., "Claribel Dervla")')
+    parser.add_argument('--language', required=True)
+    parser.add_argument('--output', required=True)
+    args = parser.parse_args()
+
+    import torch
+    from TTS.api import TTS
+
+    # Normalize language code (app uses ru-RU, XTTS uses ru)
+    lang = args.language.lower()
+    if lang in ['ru-ru', 'ru_ru']:
+        lang = 'ru'
+    elif lang in ['en-us', 'en-gb', 'en_us', 'en_gb', 'en']:
+        lang = 'en'
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+
+    tts.tts_to_file(
+        text=args.text,
+        speaker=args.speaker,
+        language=lang,
+        file_path=args.output
+    )
+
+    print(f"Audio saved to {args.output}")
+
+if __name__ == "__main__":
+    main()
 `
 }
 
