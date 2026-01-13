@@ -1,11 +1,426 @@
 import fs from 'fs'
 import path from 'path'
-import { exec, spawn } from 'child_process'
+import { exec, spawn, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 import { app } from 'electron'
 import { checkSileroInstalled, checkCoquiInstalled, getInstalledRHVoices } from './setup'
+import http from 'http'
 
 const execAsync = promisify(exec)
+
+// Temp directory name (app-specific to avoid conflicts)
+const TEMP_AUDIO_DIR_NAME = 'bookify_tts_temp'
+
+// Track last used output directory for cleanup
+let lastOutputDir: string | null = null
+
+// Cleanup temp audio directory
+export function cleanupTempAudio(outputDir?: string): void {
+  const dirsToClean: string[] = []
+
+  if (outputDir) {
+    dirsToClean.push(path.join(outputDir, TEMP_AUDIO_DIR_NAME))
+  }
+
+  if (lastOutputDir && lastOutputDir !== outputDir) {
+    dirsToClean.push(path.join(lastOutputDir, TEMP_AUDIO_DIR_NAME))
+  }
+
+  for (const tempDir of dirsToClean) {
+    try {
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true })
+        console.log(`Cleaned up temp directory: ${tempDir}`)
+      }
+    } catch (error) {
+      console.warn(`Failed to clean up temp directory ${tempDir}:`, error)
+    }
+  }
+}
+
+// ==================== TTS Server Management ====================
+
+const TTS_SERVER_PORT = 5050
+const TTS_SERVER_URL = `http://127.0.0.1:${TTS_SERVER_PORT}`
+
+let ttsServerProcess: ChildProcess | null = null
+let ttsServerReady = false
+let serverStarting = false // Prevent multiple simultaneous starts
+
+// Kill process tree on Windows (taskkill /T kills child processes)
+async function killProcessTree(pid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    try {
+      await execAsync(`taskkill /pid ${pid} /T /F`)
+    } catch {
+      // Process may already be dead
+    }
+  } else {
+    try {
+      process.kill(-pid, 'SIGKILL') // Kill process group on Unix
+    } catch {
+      // Process may already be dead
+    }
+  }
+}
+
+// Kill any orphan TTS server processes (from previous crashes)
+export async function killOrphanTTSServers(): Promise<void> {
+  if (process.platform === 'win32') {
+    try {
+      // Find python processes running tts_server.py
+      const { stdout } = await execAsync('wmic process where "commandline like \'%tts_server.py%\'" get processid /format:list')
+      const pids = stdout.match(/ProcessId=(\d+)/g)
+      if (pids) {
+        for (const match of pids) {
+          const pid = parseInt(match.replace('ProcessId=', ''))
+          if (pid && !isNaN(pid)) {
+            console.log(`Killing orphan TTS server process: ${pid}`)
+            await killProcessTree(pid)
+          }
+        }
+      }
+    } catch {
+      // No orphan processes or wmic not available
+    }
+  }
+}
+
+export interface TTSServerStatus {
+  running: boolean
+  silero: {
+    ru_loaded: boolean
+    en_loaded: boolean
+  }
+  coqui: {
+    loaded: boolean
+  }
+  memory_gb: number
+  cpu_percent: number
+  device: string
+}
+
+function getTTSServerScript(): string {
+  const resourcesPath = getResourcesPath()
+  return path.join(resourcesPath, 'tts_server.py')
+}
+
+function getTTSServerPythonExecutable(): string {
+  // Prefer Coqui's venv as it has all dependencies (including TTS module)
+  // Silero's venv doesn't have the TTS module which causes "No module named 'TTS'" error
+  const coquiExe = getCoquiPythonExecutable()
+  if (fs.existsSync(coquiExe)) {
+    return coquiExe
+  }
+  return getSileroPythonExecutable()
+}
+
+async function waitForServer(maxAttempts: number = 30, delayMs: number = 500): Promise<boolean> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const status = await getTTSServerStatus()
+      if (status.running) {
+        return true
+      }
+    } catch {
+      // Server not ready yet
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+  return false
+}
+
+export async function startTTSServer(): Promise<void> {
+  // Already running
+  if (ttsServerProcess && ttsServerReady) {
+    console.log('TTS Server already running')
+    return
+  }
+
+  // Prevent multiple simultaneous starts
+  if (serverStarting) {
+    console.log('TTS Server is already starting, waiting...')
+    await waitForServer()
+    return
+  }
+
+  serverStarting = true
+
+  try {
+    // Kill any orphan servers first
+    await killOrphanTTSServers()
+
+    const pythonExe = getTTSServerPythonExecutable()
+    const serverScript = getTTSServerScript()
+
+    if (!fs.existsSync(pythonExe)) {
+      throw new Error('Python environment not found. Please install Silero or Coqui first.')
+    }
+
+    if (!fs.existsSync(serverScript)) {
+      throw new Error('TTS Server script not found.')
+    }
+
+    console.log('Starting TTS Server...')
+
+    await new Promise<void>((resolve, reject) => {
+      const args = [serverScript, '--port', TTS_SERVER_PORT.toString()]
+
+      ttsServerProcess = spawn(pythonExe, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: false // Ensure child dies with parent
+      })
+
+      const pid = ttsServerProcess.pid
+      console.log(`TTS Server process started with PID: ${pid}`)
+
+      ttsServerProcess.stdout?.on('data', (data) => {
+        console.log('[TTS Server]', data.toString().trim())
+      })
+
+      ttsServerProcess.stderr?.on('data', (data) => {
+        const msg = data.toString().trim()
+        console.log('[TTS Server]', msg)
+        // Check if server started
+        if (msg.includes('Running on')) {
+          ttsServerReady = true
+        }
+      })
+
+      ttsServerProcess.on('error', (error) => {
+        console.error('TTS Server error:', error)
+        ttsServerProcess = null
+        ttsServerReady = false
+        reject(error)
+      })
+
+      ttsServerProcess.on('close', (code) => {
+        console.log(`TTS Server exited with code ${code}`)
+        ttsServerProcess = null
+        ttsServerReady = false
+      })
+
+      // Wait for server to be ready
+      waitForServer().then((ready) => {
+        if (ready) {
+          console.log('TTS Server is ready')
+          resolve()
+        } else {
+          reject(new Error('TTS Server failed to start'))
+        }
+      })
+    })
+  } finally {
+    serverStarting = false
+  }
+}
+
+export async function stopTTSServer(): Promise<void> {
+  const pid = ttsServerProcess?.pid
+
+  if (!ttsServerProcess || !pid) {
+    // Even if we don't have a process reference, kill any orphans
+    await killOrphanTTSServers()
+    return
+  }
+
+  console.log(`Stopping TTS Server (PID: ${pid})...`)
+
+  try {
+    // Try graceful shutdown via HTTP first
+    await httpRequest(`${TTS_SERVER_URL}/shutdown`, 'POST')
+    // Wait a bit for graceful shutdown
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  } catch {
+    // Graceful shutdown failed, will force kill
+  }
+
+  // Force kill the process tree to ensure all child processes are killed
+  await killProcessTree(pid)
+
+  ttsServerProcess = null
+  ttsServerReady = false
+  serverStarting = false
+  console.log('TTS Server stopped')
+}
+
+export async function getTTSServerStatus(): Promise<TTSServerStatus> {
+  try {
+    const response = await httpRequest(`${TTS_SERVER_URL}/status`, 'GET')
+    const data = JSON.parse(response)
+    return {
+      running: true,
+      silero: data.silero,
+      coqui: data.coqui,
+      memory_gb: data.memory_gb,
+      cpu_percent: data.cpu_percent || 0,
+      device: data.device
+    }
+  } catch {
+    return {
+      running: false,
+      silero: { ru_loaded: false, en_loaded: false },
+      coqui: { loaded: false },
+      memory_gb: 0,
+      cpu_percent: 0,
+      device: 'unknown'
+    }
+  }
+}
+
+export async function loadTTSModel(
+  engine: 'silero' | 'coqui',
+  language?: string
+): Promise<{ success: boolean; memory_gb: number; error?: string }> {
+  try {
+    // Start server if not running
+    const status = await getTTSServerStatus()
+    if (!status.running) {
+      await startTTSServer()
+    }
+
+    const body = JSON.stringify({ engine, language })
+    const response = await httpRequest(`${TTS_SERVER_URL}/load`, 'POST', body)
+    const data = JSON.parse(response)
+
+    return {
+      success: data.success,
+      memory_gb: data.memory_gb
+    }
+  } catch (error) {
+    return {
+      success: false,
+      memory_gb: 0,
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+export async function unloadTTSModel(
+  engine: 'silero' | 'coqui' | 'all',
+  language?: string
+): Promise<{ success: boolean; memory_gb: number }> {
+  try {
+    const body = JSON.stringify({ engine, language })
+    const response = await httpRequest(`${TTS_SERVER_URL}/unload`, 'POST', body)
+    const data = JSON.parse(response)
+
+    return {
+      success: data.success,
+      memory_gb: data.memory_gb
+    }
+  } catch {
+    return { success: false, memory_gb: 0 }
+  }
+}
+
+async function generateViaServer(
+  engine: 'silero' | 'coqui',
+  text: string,
+  speaker: string,
+  language: string,
+  outputPath: string,
+  rate?: string | number
+): Promise<void> {
+  const body = JSON.stringify({
+    engine,
+    text,
+    speaker,
+    language,
+    rate
+  })
+
+  const audioBuffer = await httpRequestBinary(`${TTS_SERVER_URL}/generate`, 'POST', body)
+
+  // Ensure output directory exists
+  const outputDir = path.dirname(outputPath)
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true })
+  }
+
+  fs.writeFileSync(outputPath, audioBuffer)
+}
+
+function httpRequest(url: string, method: string, body?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url)
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path: urlObj.pathname,
+      method,
+      headers: body ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      } : {}
+    }
+
+    const req = http.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data)
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${data}`))
+        }
+      })
+    })
+
+    req.on('error', reject)
+    req.setTimeout(60000, () => {
+      req.destroy()
+      reject(new Error('Request timeout'))
+    })
+
+    if (body) {
+      req.write(body)
+    }
+    req.end()
+  })
+}
+
+function httpRequestBinary(url: string, method: string, body?: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url)
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path: urlObj.pathname,
+      method,
+      headers: body ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      } : {}
+    }
+
+    const req = http.request(options, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', chunk => chunks.push(chunk))
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks)
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(buffer)
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${buffer.toString()}`))
+        }
+      })
+    })
+
+    req.on('error', reject)
+    req.setTimeout(120000, () => {
+      req.destroy()
+      reject(new Error('Request timeout'))
+    })
+
+    if (body) {
+      req.write(body)
+    }
+    req.end()
+  })
+}
+
+// ==================== End TTS Server Management ====================
 
 export type TTSProvider = 'rhvoice' | 'piper' | 'silero' | 'elevenlabs' | 'coqui'
 
@@ -537,6 +952,16 @@ async function generateSpeechWithSilero(
   outputPath: string,
   options: { rate?: string } = {}
 ): Promise<void> {
+  // Try to use TTS server first
+  const serverStatus = await getTTSServerStatus()
+  if (serverStatus.running) {
+    // Determine language from speaker path (e.g., "v5_ru/aidar" -> "ru")
+    const language = speakerPath.includes('_ru') ? 'ru' : 'en'
+    await generateViaServer('silero', text, speakerPath, language, outputPath, options.rate)
+    return
+  }
+
+  // Fallback to spawning process
   const pythonExe = getSileroPythonExecutable()
   const sileroScript = getSileroScript()
 
@@ -600,6 +1025,14 @@ async function generateSpeechWithCoqui(
   language: string,
   outputPath: string
 ): Promise<void> {
+  // Try to use TTS server first
+  const serverStatus = await getTTSServerStatus()
+  if (serverStatus.running) {
+    await generateViaServer('coqui', text, speakerName, language, outputPath)
+    return
+  }
+
+  // Fallback to spawning process
   const pythonExe = getCoquiPythonExecutable()
   const coquiScript = getCoquiScript()
 
@@ -811,7 +1244,8 @@ export async function convertToSpeech(
   voiceShortName: string,
   outputPath: string,
   options: { rate?: string; volume?: string; sentencePause?: number } = {},
-  onProgress?: (progress: number, status: string) => void
+  onProgress?: (progress: number, status: string) => void,
+  isAborted?: () => boolean
 ): Promise<void> {
   // Find voice by short name across all providers
   let voiceInfo: VoiceInfo | undefined
@@ -855,7 +1289,9 @@ export async function convertToSpeech(
 
   onProgress?.(0, `Preparing ${totalChunks} text segments in ${totalParts} parts... (${voiceInfo.provider})`)
 
-  const tempDir = path.join(path.dirname(outputPath), 'temp_audio')
+  const outputDir = path.dirname(outputPath)
+  lastOutputDir = outputDir // Remember for cleanup
+  const tempDir = path.join(outputDir, TEMP_AUDIO_DIR_NAME)
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true })
   }
@@ -937,6 +1373,11 @@ export async function convertToSpeech(
 
   // Process chunks with proper parallelization
   for (let i = 0; i < chunks.length; i += concurrentLimit) {
+    // Check if conversion was aborted
+    if (isAborted?.()) {
+      return
+    }
+
     const batch = []
     for (let j = 0; j < concurrentLimit && i + j < chunks.length; j++) {
       batch.push(processNextChunk())
@@ -972,7 +1413,6 @@ export async function convertToSpeech(
   }
 
   // Combine files into parts
-  const outputDir = path.dirname(outputPath)
   const outputBaseName = path.basename(outputPath, path.extname(outputPath))
 
   if (!fs.existsSync(outputDir)) {

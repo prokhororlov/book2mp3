@@ -182,6 +182,28 @@ const electronAPI = {
     ipcRenderer.on('setup-progress', handler)
     return () => ipcRenderer.removeListener('setup-progress', handler)
   },
+
+  // TTS Server management
+  ttsServerStart: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('tts-server-start'),
+
+  ttsServerStop: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('tts-server-stop'),
+
+  ttsServerStatus: (): Promise<{
+    running: boolean
+    silero: { ru_loaded: boolean; en_loaded: boolean }
+    coqui: { loaded: boolean }
+    memory_gb: number
+    cpu_percent: number
+    device: string
+  }> => ipcRenderer.invoke('tts-server-status'),
+
+  ttsModelLoad: (engine: 'silero' | 'coqui', language?: string): Promise<{ success: boolean; memory_gb: number; error?: string }> =>
+    ipcRenderer.invoke('tts-model-load', engine, language),
+
+  ttsModelUnload: (engine: 'silero' | 'coqui' | 'all', language?: string): Promise<{ success: boolean; memory_gb: number }> =>
+    ipcRenderer.invoke('tts-model-unload', engine, language),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

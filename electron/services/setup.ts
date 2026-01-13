@@ -1275,7 +1275,7 @@ export async function installSilero(
 
     const depsResult = await runPipWithProgress(
       venvPython,
-      'omegaconf numpy scipy',
+      'omegaconf numpy scipy flask psutil',
       {
         timeout: 180000,
         onProgress: (info) => {
@@ -1322,6 +1322,11 @@ export async function installSilero(
 
     const generateScript = getGenerateScriptContent()
     fs.writeFileSync(path.join(sileroPath, 'generate.py'), generateScript, 'utf-8')
+
+    // Copy TTS server script to tts_resources root
+    const ttsServerScript = getTTSServerScriptContent()
+    const ttsResourcesPath = path.dirname(sileroPath)
+    fs.writeFileSync(path.join(ttsResourcesPath, 'tts_server.py'), ttsServerScript, 'utf-8')
 
     // Verify installation
     onProgress({
@@ -1693,12 +1698,12 @@ export async function installCoqui(
     onProgress({
       stage: 'coqui',
       progress: 42,
-      details: 'Installing numpy, scipy...'
+      details: 'Installing numpy, scipy, omegaconf...'
     })
 
     const depsResult = await runPipWithProgress(
       venvPython,
-      'numpy scipy',
+      'numpy scipy omegaconf',
       {
         timeout: 300000,
         extraArgs: ['--prefer-binary'],
@@ -1737,7 +1742,7 @@ export async function installCoqui(
 
     const ttsResult = await runPipWithProgress(
       venvPython,
-      'TTS',
+      'TTS flask psutil',
       {
         timeout: 1200000,
         msvcEnvPath: vcvarsallPath,
@@ -1999,6 +2004,198 @@ def main():
 
 if __name__ == "__main__":
     main()
+`
+}
+
+// TTS Server script content - Universal server for Silero and Coqui
+function getTTSServerScriptContent(): string {
+  return `#!/usr/bin/env python3
+"""Universal TTS Server for Silero and Coqui XTTS"""
+
+import argparse, gc, io, os, sys, re, threading, time
+from pathlib import Path
+
+os.environ["COQUI_TOS_AGREED"] = "1"
+
+try:
+    from flask import Flask, request, jsonify, Response
+    import torch
+    import psutil
+    import scipy.io.wavfile as wavfile
+    import numpy as np
+    from scipy import signal
+except ImportError as e:
+    print(f"Missing dependency: {e}", file=sys.stderr)
+    sys.exit(1)
+
+_orig_load = torch.load
+def _patched_load(*a, **kw):
+    if 'weights_only' not in kw:
+        kw['weights_only'] = False
+    return _orig_load(*a, **kw)
+torch.load = _patched_load
+
+app = Flask(__name__)
+models = {"silero": {"ru": None, "en": None}, "coqui": None}
+coqui_lock = threading.Lock()
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def get_memory_gb():
+    return psutil.Process().memory_info().rss / (1024**3)
+
+def parse_rate(rate_str):
+    if not rate_str:
+        return 1.0
+    m = re.match(r'^([+-])(\\\\d+)%$', str(rate_str))
+    if m:
+        return 1.0 + int(m.group(2)) / 100 if m.group(1) == '+' else 1.0 - int(m.group(2)) / 100
+    try:
+        return float(rate_str)
+    except:
+        return 1.0
+
+def change_speed(audio, factor):
+    return audio if factor == 1.0 else signal.resample(audio, int(len(audio) / factor))
+
+def audio_to_wav_bytes(audio, sr=48000):
+    if isinstance(audio, torch.Tensor):
+        audio = audio.numpy()
+    if audio.ndim > 1:
+        audio = audio.squeeze()
+    buf = io.BytesIO()
+    wavfile.write(buf, sr, (audio * 32767).astype(np.int16))
+    buf.seek(0)
+    return buf.read()
+
+def load_silero_model(lang):
+    global models
+    model_name = 'v5_ru' if lang == 'ru' else 'v3_en'
+    print(f"Loading Silero {model_name}...", file=sys.stderr)
+    model, _ = torch.hub.load('snakers4/silero-models', 'silero_tts', language=lang, speaker=model_name)
+    model.to(torch.device('cpu'))
+    models["silero"][lang] = model
+    print(f"Silero {lang} loaded. Memory: {get_memory_gb():.2f} GB", file=sys.stderr)
+
+def generate_silero(text, speaker, lang, rate=1.0, sr=48000):
+    if models["silero"].get(lang) is None:
+        load_silero_model(lang)
+    model = models["silero"][lang]
+    spk = speaker.split('/')[-1] if '/' in speaker else speaker
+    audio = model.apply_tts(text=text, speaker=spk, sample_rate=sr)
+    if isinstance(audio, torch.Tensor):
+        audio = audio.numpy()
+    if audio.ndim > 1:
+        audio = audio.squeeze()
+    factor = parse_rate(rate) if isinstance(rate, str) else rate
+    if factor != 1.0:
+        audio = change_speed(audio, factor)
+    return audio_to_wav_bytes(audio, sr)
+
+def load_coqui_model():
+    global models
+    print("Loading Coqui XTTS-v2...", file=sys.stderr)
+    from TTS.api import TTS
+    models["coqui"] = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+    print(f"Coqui loaded on {device}. Memory: {get_memory_gb():.2f} GB", file=sys.stderr)
+
+def generate_coqui(text, speaker, lang):
+    l = lang.lower()
+    if l in ['ru-ru', 'ru_ru']:
+        l = 'ru'
+    elif l in ['en-us', 'en-gb', 'en_us', 'en_gb']:
+        l = 'en'
+    with coqui_lock:
+        if models["coqui"] is None:
+            load_coqui_model()
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            tmp = f.name
+        try:
+            models["coqui"].tts_to_file(text=text, speaker=speaker, language=l, file_path=tmp)
+            with open(tmp, 'rb') as f:
+                return f.read()
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
+@app.route("/status", methods=["GET"])
+def status():
+    return jsonify({
+        "silero": {"ru_loaded": models["silero"]["ru"] is not None, "en_loaded": models["silero"]["en"] is not None},
+        "coqui": {"loaded": models["coqui"] is not None},
+        "memory_gb": round(get_memory_gb(), 2), "device": device
+    })
+
+@app.route("/load", methods=["POST"])
+def load_model():
+    data = request.json or {}
+    engine, lang = data.get("engine"), data.get("language", "ru")
+    if not engine:
+        return jsonify({"error": "Missing engine"}), 400
+    try:
+        if engine == "silero" and models["silero"].get(lang) is None:
+            load_silero_model(lang)
+        elif engine == "coqui" and models["coqui"] is None:
+            load_coqui_model()
+        return jsonify({"success": True, "memory_gb": round(get_memory_gb(), 2)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/unload", methods=["POST"])
+def unload_model():
+    data = request.json or {}
+    engine, lang = data.get("engine"), data.get("language")
+    if engine == "silero":
+        if lang:
+            models["silero"][lang] = None
+        else:
+            models["silero"] = {"ru": None, "en": None}
+    elif engine == "coqui":
+        models["coqui"] = None
+    elif engine == "all":
+        models["silero"] = {"ru": None, "en": None}
+        models["coqui"] = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return jsonify({"success": True, "memory_gb": round(get_memory_gb(), 2)})
+
+@app.route("/generate", methods=["POST"])
+def generate():
+    data = request.json or {}
+    engine, text, speaker = data.get("engine"), data.get("text"), data.get("speaker")
+    lang, rate = data.get("language", "ru"), data.get("rate", 1.0)
+    if not all([engine, text, speaker]):
+        return jsonify({"error": "Missing params"}), 400
+    try:
+        audio = generate_silero(text, speaker, lang, rate) if engine == "silero" else generate_coqui(text, speaker, lang)
+        return Response(audio, mimetype="audio/wav")
+    except Exception as e:
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/shutdown", methods=["POST"])
+def shutdown():
+    global models
+    models = {"silero": {"ru": None, "en": None}, "coqui": None}
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
+    return jsonify({"success": True})
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--port", type=int, default=5050)
+    p.add_argument("--host", type=str, default="127.0.0.1")
+    args = p.parse_args()
+    print(f"TTS Server on {args.host}:{args.port}, device={device}", file=sys.stderr)
+    app.run(host=args.host, port=args.port, threaded=True)
 `
 }
 

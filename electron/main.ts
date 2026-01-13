@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
-import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders } from './services/tts'
+import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
 import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools } from './services/setup'
 
 // Load environment variables from .env file
@@ -53,7 +53,10 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Kill any orphan TTS server processes from previous crashes
+  await killOrphanTTSServers()
+
   // Load saved ElevenLabs API key, env variable takes priority
   if (process.env.ELEVENLABS_API_KEY) {
     setElevenLabsApiKey(process.env.ELEVENLABS_API_KEY)
@@ -77,6 +80,19 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// Graceful shutdown - stop TTS server and cleanup temp files before quitting
+app.on('before-quit', async (event) => {
+  event.preventDefault()
+  try {
+    // Cleanup temp audio files
+    cleanupTempAudio()
+    await stopTTSServer()
+  } catch (error) {
+    console.error('Error during shutdown:', error)
+  }
+  app.exit(0)
 })
 
 app.on('activate', () => {
@@ -143,6 +159,7 @@ ipcMain.handle('get-available-providers', () => {
 })
 
 let conversionAborted = false
+let lastConversionOutputPath: string | null = null
 
 ipcMain.handle('convert-to-speech', async (
   event,
@@ -152,6 +169,12 @@ ipcMain.handle('convert-to-speech', async (
   options: { rate?: string; volume?: string }
 ) => {
   conversionAborted = false
+
+  // Cleanup temp from previous conversion before starting new one
+  if (lastConversionOutputPath) {
+    cleanupTempAudio(path.dirname(lastConversionOutputPath))
+  }
+  lastConversionOutputPath = outputPath
 
   try {
     await convertToSpeech(
@@ -163,10 +186,13 @@ ipcMain.handle('convert-to-speech', async (
         if (!conversionAborted) {
           event.sender.send('conversion-progress', { progress, status })
         }
-      }
+      },
+      () => conversionAborted
     )
     return { success: true }
   } catch (error) {
+    // Cleanup on error
+    cleanupTempAudio(path.dirname(outputPath))
     if (conversionAborted) {
       return { success: false, error: 'Conversion cancelled' }
     }
@@ -176,6 +202,10 @@ ipcMain.handle('convert-to-speech', async (
 
 ipcMain.handle('abort-conversion', async () => {
   conversionAborted = true
+  // Cleanup temp files on abort
+  if (lastConversionOutputPath) {
+    cleanupTempAudio(path.dirname(lastConversionOutputPath))
+  }
   return { success: true }
 })
 
@@ -402,4 +432,36 @@ ipcMain.handle('run-setup', async (event, options?: {
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
+})
+
+// ==================== TTS Server IPC Handlers ====================
+
+ipcMain.handle('tts-server-start', async () => {
+  try {
+    await startTTSServer()
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('tts-server-stop', async () => {
+  try {
+    await stopTTSServer()
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('tts-server-status', async () => {
+  return getTTSServerStatus()
+})
+
+ipcMain.handle('tts-model-load', async (_event, engine: 'silero' | 'coqui', language?: string) => {
+  return loadTTSModel(engine, language)
+})
+
+ipcMain.handle('tts-model-unload', async (_event, engine: 'silero' | 'coqui' | 'all', language?: string) => {
+  return unloadTTSModel(engine, language)
 })

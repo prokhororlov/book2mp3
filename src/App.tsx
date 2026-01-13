@@ -166,6 +166,17 @@ function App() {
   const [coquiInstallProgress, setCoquiInstallProgress] = useState('')
   const [coquiInstallPercent, setCoquiInstallPercent] = useState(0)
 
+  // TTS Server state
+  const [ttsServerStatus, setTtsServerStatus] = useState<{
+    running: boolean
+    silero: { ru_loaded: boolean; en_loaded: boolean }
+    coqui: { loaded: boolean }
+    memory_gb: number
+    cpu_percent: number
+    device: string
+  } | null>(null)
+  const [isLoadingModel, setIsLoadingModel] = useState<string | null>(null)
+
   // Piper voice installation state
   const [installingVoice, setInstallingVoice] = useState<string | null>(null)
   const [voiceInstallProgress, setVoiceInstallProgress] = useState<number>(0)
@@ -565,6 +576,54 @@ function App() {
     setTempPreviewText('')
   }
 
+  // TTS Server management functions
+  const refreshServerStatus = async () => {
+    if (!window.electronAPI) return
+    try {
+      const status = await window.electronAPI.ttsServerStatus()
+      setTtsServerStatus(status)
+    } catch (err) {
+      console.error('Failed to get server status:', err)
+    }
+  }
+
+  const handleLoadModel = async (engine: 'silero' | 'coqui', language?: string) => {
+    if (!window.electronAPI) return
+    const loadKey = language ? `${engine}-${language}` : engine
+    setIsLoadingModel(loadKey)
+    try {
+      const result = await window.electronAPI.ttsModelLoad(engine, language)
+      if (!result.success && result.error) {
+        setError(result.error)
+      }
+      await refreshServerStatus()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setIsLoadingModel(null)
+    }
+  }
+
+  const handleUnloadModel = async (engine: 'silero' | 'coqui' | 'all', language?: string) => {
+    if (!window.electronAPI) return
+    try {
+      await window.electronAPI.ttsModelUnload(engine, language)
+      await refreshServerStatus()
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  // Refresh server status periodically when Silero or Coqui is selected
+  useEffect(() => {
+    if ((selectedProvider === 'silero' && sileroInstalled) ||
+        (selectedProvider === 'coqui' && coquiInstalled)) {
+      refreshServerStatus()
+      const interval = setInterval(refreshServerStatus, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [selectedProvider, sileroInstalled, coquiInstalled])
+
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -626,6 +685,25 @@ function App() {
 
   // Check if any installation is in progress
   const isAnyInstallationInProgress = isInstallingSilero || isInstallingCoqui || isInstallingPiperCore || isInstallingRHVoiceCore || installingVoice !== null || installingRHVoice !== null
+
+  // Check if TTS model is loaded for current language (Silero/Coqui only)
+  const isModelLoadedForLanguage = (() => {
+    if (selectedProvider === 'silero') {
+      // For Silero, check if model for selected language is loaded
+      const langCode = language.startsWith('ru') ? 'ru' : 'en'
+      if (langCode === 'ru') {
+        return ttsServerStatus?.silero.ru_loaded === true
+      } else {
+        return ttsServerStatus?.silero.en_loaded === true
+      }
+    }
+    if (selectedProvider === 'coqui') {
+      // For Coqui, single multilingual model
+      return ttsServerStatus?.coqui.loaded === true
+    }
+    // Other providers don't need model loading
+    return true
+  })()
 
   // Show loading while checking setup status
   if (needsSetup === null) {
@@ -1076,6 +1154,162 @@ function App() {
                 </div>
               )}
 
+              {/* TTS Model Management Panel - LM Studio style */}
+              {((selectedProvider === 'silero' && sileroInstalled) ||
+                (selectedProvider === 'coqui' && coquiInstalled)) && (
+                <div className="space-y-3 p-3 border rounded-md bg-gradient-to-b from-muted/40 to-muted/20">
+                  {/* Header with explanation */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Cpu className="h-3.5 w-3.5" />
+                    <span>Load models into RAM for fast generation</span>
+                  </div>
+
+                  {/* Silero Models */}
+                  {selectedProvider === 'silero' && (
+                    <div className="space-y-2">
+                      {/* Russian Model Card */}
+                      <div className={`p-2.5 rounded-lg border ${ttsServerStatus?.silero.ru_loaded ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-background/50'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2.5 h-2.5 rounded-full ${ttsServerStatus?.silero.ru_loaded ? 'bg-green-500 shadow-sm shadow-green-500/50' : 'bg-muted-foreground/30'}`} />
+                            <div>
+                              <div className="font-medium text-sm">Silero v5_ru</div>
+                              <div className="text-xs text-muted-foreground">Russian</div>
+                            </div>
+                          </div>
+                          <Button
+                            variant={ttsServerStatus?.silero.ru_loaded ? "outline" : "default"}
+                            size="sm"
+                            className="h-8 text-xs px-3"
+                            disabled={isLoadingModel !== null}
+                            onClick={() => ttsServerStatus?.silero.ru_loaded
+                              ? handleUnloadModel('silero', 'ru')
+                              : handleLoadModel('silero', 'ru')
+                            }
+                          >
+                            {isLoadingModel === 'silero-ru' ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                                Loading...
+                              </>
+                            ) : ttsServerStatus?.silero.ru_loaded ? (
+                              <>
+                                <X className="h-3.5 w-3.5 mr-1.5" />
+                                Eject
+                              </>
+                            ) : (
+                              <>
+                                <Cpu className="h-3.5 w-3.5 mr-1.5" />
+                                Load to RAM
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* English Model Card */}
+                      <div className={`p-2.5 rounded-lg border ${ttsServerStatus?.silero.en_loaded ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-background/50'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2.5 h-2.5 rounded-full ${ttsServerStatus?.silero.en_loaded ? 'bg-green-500 shadow-sm shadow-green-500/50' : 'bg-muted-foreground/30'}`} />
+                            <div>
+                              <div className="font-medium text-sm">Silero v3_en</div>
+                              <div className="text-xs text-muted-foreground">English</div>
+                            </div>
+                          </div>
+                          <Button
+                            variant={ttsServerStatus?.silero.en_loaded ? "outline" : "default"}
+                            size="sm"
+                            className="h-8 text-xs px-3"
+                            disabled={isLoadingModel !== null}
+                            onClick={() => ttsServerStatus?.silero.en_loaded
+                              ? handleUnloadModel('silero', 'en')
+                              : handleLoadModel('silero', 'en')
+                            }
+                          >
+                            {isLoadingModel === 'silero-en' ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                                Loading...
+                              </>
+                            ) : ttsServerStatus?.silero.en_loaded ? (
+                              <>
+                                <X className="h-3.5 w-3.5 mr-1.5" />
+                                Eject
+                              </>
+                            ) : (
+                              <>
+                                <Cpu className="h-3.5 w-3.5 mr-1.5" />
+                                Load to RAM
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Coqui Model */}
+                  {selectedProvider === 'coqui' && (
+                    <div className={`p-2.5 rounded-lg border ${ttsServerStatus?.coqui.loaded ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-background/50'}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2.5 h-2.5 rounded-full ${ttsServerStatus?.coqui.loaded ? 'bg-green-500 shadow-sm shadow-green-500/50' : 'bg-muted-foreground/30'}`} />
+                          <div>
+                            <div className="font-medium text-sm">Coqui XTTS-v2</div>
+                            <div className="text-xs text-muted-foreground">Multilingual</div>
+                          </div>
+                        </div>
+                        <Button
+                          variant={ttsServerStatus?.coqui.loaded ? "outline" : "default"}
+                          size="sm"
+                          className="h-8 text-xs px-3"
+                          disabled={isLoadingModel !== null}
+                          onClick={() => ttsServerStatus?.coqui.loaded
+                            ? handleUnloadModel('coqui')
+                            : handleLoadModel('coqui')
+                          }
+                        >
+                          {isLoadingModel === 'coqui' ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                              Loading...
+                            </>
+                          ) : ttsServerStatus?.coqui.loaded ? (
+                            <>
+                              <X className="h-3.5 w-3.5 mr-1.5" />
+                              Eject
+                            </>
+                          ) : (
+                            <>
+                              <Cpu className="h-3.5 w-3.5 mr-1.5" />
+                              Load to RAM
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Current Usage Status Bar */}
+                  {ttsServerStatus?.running && (
+                    <div className="text-xs text-muted-foreground pt-2 border-t">
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground/70">Current usage:</span>
+                        <span className="font-mono">RAM: {ttsServerStatus.memory_gb.toFixed(2)} GB</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Hint when no model loaded */}
+                  {(!ttsServerStatus?.running || !isModelLoadedForLanguage) && (
+                    <p className="text-xs text-muted-foreground text-center py-1">
+                      Load the model for your language to enable voice preview and conversion
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Piper Setup Notice */}
               {selectedProvider === 'piper' && !piperInstalled && (
                 <div className="space-y-3 p-4 border rounded-md bg-muted/50">
@@ -1270,11 +1504,11 @@ function App() {
                         }
                         setSelectedVoice(value)
                       }}
-                      disabled={!isProviderReady || isConverting || installingVoice !== null || installingRHVoice !== null}
+                      disabled={!isProviderReady || !isModelLoadedForLanguage || isConverting || installingVoice !== null || installingRHVoice !== null}
                     >
                       <SelectTrigger className="flex-1 h-9" showChevron={installingVoice === null && installingRHVoice === null}>
                         <SelectValue placeholder={
-                          !isProviderReady ? "Setup required" : "Select voice"
+                          !isProviderReady ? "Setup required" : !isModelLoadedForLanguage ? "Load model first" : "Select voice"
                         }>
                           {selectedVoice && (() => {
                             const voice = filteredVoices.find(v => v.shortName === selectedVoice)
@@ -1540,8 +1774,8 @@ function App() {
                       size="icon"
                       className="h-9 w-9"
                       onClick={handlePreviewVoice}
-                      disabled={!isProviderReady || !isSelectedVoiceValid || isConverting || isPreviewing || installingVoice !== null || installingRHVoice !== null}
-                      title="Preview voice"
+                      disabled={!isProviderReady || !isModelLoadedForLanguage || !isSelectedVoiceValid || isConverting || isPreviewing || installingVoice !== null || installingRHVoice !== null}
+                      title={!isModelLoadedForLanguage ? "Load model first" : "Preview voice"}
                     >
                       {isPreviewing ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1739,11 +1973,12 @@ function App() {
             {!isConverting ? (
               <Button
                 onClick={handleConvert}
-                disabled={!isSelectedVoiceValid}
+                disabled={!isModelLoadedForLanguage || !isSelectedVoiceValid}
                 className="w-full h-12 text-base gap-2"
+                title={!isModelLoadedForLanguage ? "Load model first to convert" : ""}
               >
                 <Play className="h-5 w-5" />
-                Convert to MP3
+                {!isModelLoadedForLanguage ? "Load model to convert" : "Convert to MP3"}
               </Button>
             ) : (
               <Button
