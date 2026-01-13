@@ -1105,13 +1105,13 @@ def main():
         if len(parts) != 2:
             raise ValueError(f"Invalid speaker path format: {args.speaker}")
 
-        model_id = parts[0]  # e.g., 'v3_1_ru' or 'v3_en'
+        model_id = parts[0]  # e.g., 'v5_ru' or 'v3_en'
         speaker = parts[1]    # e.g., 'aidar', 'baya', etc.
 
         # Determine language
         if 'ru' in model_id:
             language = 'ru'
-            model_name = 'v3_1_ru'
+            model_name = 'v5_ru'
         elif 'en' in model_id:
             language = 'en'
             model_name = 'v3_en'
