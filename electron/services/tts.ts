@@ -271,7 +271,8 @@ export function getElevenLabsApiKey(): string | null {
 function isPiperVoiceInstalled(modelPath: string): boolean {
   const resourcesPath = getPiperResourcesPath()
   const fullModelPath = path.join(resourcesPath, 'voices', modelPath)
-  return fs.existsSync(fullModelPath)
+  const jsonPath = fullModelPath + '.json'
+  return fs.existsSync(fullModelPath) && fs.existsSync(jsonPath)
 }
 
 export async function getVoicesForLanguage(language: string, provider?: TTSProvider): Promise<VoiceInfo[]> {
@@ -490,7 +491,8 @@ function splitIntoChunks(text: string, maxLength: number = 1000): string[] {
 async function generateSpeechWithRHVoice(
   text: string,
   voice: string,
-  outputPath: string
+  outputPath: string,
+  options: { rate?: string } = {}
 ): Promise<void> {
   const tempDir = path.dirname(outputPath)
   const timestamp = Date.now()
@@ -499,12 +501,28 @@ async function generateSpeechWithRHVoice(
 
   fs.writeFileSync(tempTextPath, text, { encoding: 'utf8' })
 
+  // Convert rate from percentage format to SAPI rate (-10 to 10)
+  // +100% -> 10, +50% -> 5, 0% -> 0, -50% -> -5
+  let sapiRate = 0
+  if (options.rate) {
+    const match = options.rate.match(/^([+-])(\d+)%$/)
+    if (match) {
+      const sign = match[1]
+      const percent = parseInt(match[2])
+      // Map percentage to -10..10 range (100% = 10)
+      sapiRate = sign === '+' ? Math.round(percent / 10) : -Math.round(percent / 10)
+      // Clamp to valid range
+      sapiRate = Math.max(-10, Math.min(10, sapiRate))
+    }
+  }
+
   const psScript = `
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $synth.SelectVoice("${voice}")
+$synth.Rate = ${sapiRate}
 $synth.SetOutputToWaveFile("${outputPath.replace(/\\/g, '\\\\')}")
 $text = [System.IO.File]::ReadAllText("${tempTextPath.replace(/\\/g, '\\\\')}", [System.Text.Encoding]::UTF8)
 $synth.Speak($text)
@@ -526,7 +544,7 @@ async function generateSpeechWithPiper(
   text: string,
   modelPath: string,
   outputPath: string,
-  options: { rate?: string } = {}
+  options: { rate?: string; sentencePause?: number } = {}
 ): Promise<void> {
   const resourcesPath = getPiperResourcesPath()
   const fullModelPath = path.join(resourcesPath, 'voices', modelPath)
@@ -558,6 +576,11 @@ async function generateSpeechWithPiper(
       '--output_file', outputPath,
       '--length_scale', lengthScale.toFixed(2)
     ]
+
+    // Add sentence silence if specified
+    if (options.sentencePause !== undefined && options.sentencePause > 0) {
+      args.push('--sentence_silence', options.sentencePause.toFixed(2))
+    }
 
     // Run piper from its own directory so it can find DLLs
     const piperProcess = spawn(piperExe, args, { cwd: piperDir })
@@ -598,7 +621,8 @@ async function generateSpeechWithPiper(
 async function generateSpeechWithSilero(
   text: string,
   speakerPath: string,
-  outputPath: string
+  outputPath: string,
+  options: { rate?: string } = {}
 ): Promise<void> {
   const pythonExe = getSileroPythonExecutable()
   const sileroScript = getSileroScript()
@@ -612,15 +636,17 @@ async function generateSpeechWithSilero(
   }
 
   return new Promise<void>((resolve, reject) => {
-    // Extract speaker name from path (e.g., 'v3_1_ru/xenia' -> 'xenia')
-    const speaker = speakerPath.includes('/') ? speakerPath.split('/').pop()! : speakerPath
-
     const args = [
       sileroScript,
       '--text', text,
-      '--speaker', speaker,
+      '--speaker', speakerPath,
       '--output', outputPath
     ]
+
+    // Add rate parameter if specified
+    if (options.rate) {
+      args.push('--rate', options.rate)
+    }
 
     const sileroProcess = spawn(pythonExe, args)
     let stderr = ''
@@ -717,12 +743,33 @@ async function generateSpeechWithCoqui(
 async function generateSpeechWithElevenLabs(
   text: string,
   voiceId: string,
-  outputPath: string
+  outputPath: string,
+  options: { rate?: string } = {}
 ): Promise<void> {
   const apiKey = elevenLabsApiKey
 
   if (!apiKey) {
     throw new Error('ElevenLabs API key not set. Please configure your API key in settings.')
+  }
+
+  // Convert rate from percentage format to ElevenLabs speed (0.7 to 1.2)
+  // +100% -> 1.2, +20% -> 1.2, 0% -> 1.0, -30% -> 0.7
+  let speed = 1.0
+  if (options.rate) {
+    const match = options.rate.match(/^([+-])(\d+)%$/)
+    if (match) {
+      const sign = match[1]
+      const percent = parseInt(match[2])
+      if (sign === '+') {
+        // Map 0-100% to 1.0-1.2
+        speed = 1.0 + (percent / 100) * 0.2
+      } else {
+        // Map 0-50% to 1.0-0.7
+        speed = 1.0 - (percent / 100) * 0.6
+      }
+      // Clamp to valid range
+      speed = Math.max(0.7, Math.min(1.2, speed))
+    }
   }
 
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -737,7 +784,8 @@ async function generateSpeechWithElevenLabs(
       model_id: 'eleven_multilingual_v2',
       voice_settings: {
         stability: 0.5,
-        similarity_boost: 0.75
+        similarity_boost: 0.75,
+        speed: speed
       }
     })
   })
@@ -777,7 +825,7 @@ async function processChunk(
   tempDir: string,
   maxRetries: number,
   retryDelay: number,
-  options: { rate?: string }
+  options: { rate?: string; sentencePause?: number }
 ): Promise<{ success: boolean; file?: string; error?: string }> {
   let success = false
   let lastError: Error | null = null
@@ -788,7 +836,7 @@ async function processChunk(
       // Route to appropriate provider
       switch (voiceInfo.provider) {
         case 'rhvoice':
-          await generateSpeechWithRHVoice(chunk, voiceInfo.shortName, tempFile)
+          await generateSpeechWithRHVoice(chunk, voiceInfo.shortName, tempFile, options)
           break
 
         case 'piper':
@@ -802,14 +850,14 @@ async function processChunk(
           if (!voiceInfo.modelPath) {
             throw new Error('Speaker path required for Silero')
           }
-          await generateSpeechWithSilero(chunk, voiceInfo.modelPath, tempFile)
+          await generateSpeechWithSilero(chunk, voiceInfo.modelPath, tempFile, options)
           break
 
         case 'elevenlabs':
           if (!voiceInfo.voiceId) {
             throw new Error('Voice ID required for ElevenLabs')
           }
-          await generateSpeechWithElevenLabs(chunk, voiceInfo.voiceId, tempFile)
+          await generateSpeechWithElevenLabs(chunk, voiceInfo.voiceId, tempFile, options)
           break
 
         case 'coqui':
@@ -849,7 +897,7 @@ export async function convertToSpeech(
   text: string,
   voiceShortName: string,
   outputPath: string,
-  options: { rate?: string; volume?: string } = {},
+  options: { rate?: string; volume?: string; sentencePause?: number } = {},
   onProgress?: (progress: number, status: string) => void
 ): Promise<void> {
   // Find voice by short name across all providers
@@ -1057,7 +1105,8 @@ export async function convertToSpeech(
  */
 export async function previewVoice(
   text: string,
-  voiceShortName: string
+  voiceShortName: string,
+  options: { rate?: string; sentencePause?: number } = {}
 ): Promise<{ success: boolean; audioData?: string; error?: string }> {
   // Find voice by short name across all providers
   const allVoices = [
@@ -1090,28 +1139,28 @@ export async function previewVoice(
     // Generate audio based on provider
     switch (voiceInfo.provider) {
       case 'rhvoice':
-        await generateSpeechWithRHVoice(text, voiceInfo.shortName, tempWavFile)
+        await generateSpeechWithRHVoice(text, voiceInfo.shortName, tempWavFile, options)
         break
 
       case 'piper':
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Model path required for Piper' }
         }
-        await generateSpeechWithPiper(text, voiceInfo.modelPath, tempWavFile, {})
+        await generateSpeechWithPiper(text, voiceInfo.modelPath, tempWavFile, options)
         break
 
       case 'silero':
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Speaker path required for Silero' }
         }
-        await generateSpeechWithSilero(text, voiceInfo.modelPath, tempWavFile)
+        await generateSpeechWithSilero(text, voiceInfo.modelPath, tempWavFile, options)
         break
 
       case 'elevenlabs':
         if (!voiceInfo.voiceId) {
           return { success: false, error: 'Voice ID required for ElevenLabs' }
         }
-        await generateSpeechWithElevenLabs(text, voiceInfo.voiceId, tempWavFile)
+        await generateSpeechWithElevenLabs(text, voiceInfo.voiceId, tempWavFile, options)
         break
 
       case 'coqui':

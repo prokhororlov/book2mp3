@@ -585,8 +585,36 @@ async function downloadFile(
 
       const fileStream = createWriteStream(destPath)
 
+      // Live timeout - resets on each data chunk received
+      const IDLE_TIMEOUT = 30000 // 30 seconds without data = timeout
+      let timeoutId: NodeJS.Timeout | null = null
+
+      const resetTimeout = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+        }
+        timeoutId = setTimeout(() => {
+          request.destroy()
+          if (existsSync(destPath)) {
+            unlinkSync(destPath)
+          }
+          reject(new Error('Download timeout - no data received for 30 seconds'))
+        }, IDLE_TIMEOUT)
+      }
+
+      const clearTimeoutHandler = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+      }
+
+      // Start the timeout
+      resetTimeout()
+
       response.on('data', (chunk: Buffer) => {
         downloadedSize += chunk.length
+        resetTimeout() // Reset timeout on each chunk
         if (onProgress && totalSize > 0) {
           onProgress(downloadedSize, totalSize)
         }
@@ -595,11 +623,13 @@ async function downloadFile(
       response.pipe(fileStream)
 
       fileStream.on('finish', () => {
+        clearTimeoutHandler()
         fileStream.close()
         resolve()
       })
 
       fileStream.on('error', (err) => {
+        clearTimeoutHandler()
         // Clean up partial file
         if (existsSync(destPath)) {
           unlinkSync(destPath)
@@ -610,11 +640,6 @@ async function downloadFile(
 
     request.on('error', (err) => {
       reject(err)
-    })
-
-    request.setTimeout(30000, () => {
-      request.destroy()
-      reject(new Error('Download timeout'))
     })
   })
 }
@@ -1296,17 +1321,25 @@ export async function installCoqui(
     })
 
     // Set environment variable to agree to ToS and trigger model download
-    const preloadScript = `
-import os
+    // Use a temporary Python file instead of -c to avoid Windows quote escaping issues
+    const preloadScript = `import os
 os.environ["COQUI_TOS_AGREED"] = "1"
 from TTS.api import TTS
 tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
 print("Model downloaded successfully")
 `
-    await execAsync(`"${venvPython}" -c "${preloadScript.replace(/\n/g, '; ')}"`, {
-      timeout: 1800000, // 30 minutes for model download
-      maxBuffer: 1024 * 1024 * 100
-    })
+    const preloadScriptPath = path.join(coquiPath, 'preload_model.py')
+    fs.writeFileSync(preloadScriptPath, preloadScript, 'utf-8')
+
+    try {
+      await execAsync(`"${venvPython}" "${preloadScriptPath}"`, {
+        timeout: 1800000, // 30 minutes for model download
+        maxBuffer: 1024 * 1024 * 100
+      })
+    } finally {
+      // Clean up temporary script
+      try { fs.unlinkSync(preloadScriptPath) } catch {}
+    }
 
     onProgress({
       stage: 'coqui',

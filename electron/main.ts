@@ -199,8 +199,8 @@ ipcMain.handle('get-file-info', async (_event, filePath: string) => {
   }
 })
 
-ipcMain.handle('preview-voice', async (_event, text: string, voiceShortName: string) => {
-  return await previewVoice(text, voiceShortName)
+ipcMain.handle('preview-voice', async (_event, text: string, voiceShortName: string, options: Record<string, unknown> = {}) => {
+  return await previewVoice(text, voiceShortName, options as { rate?: string; sentencePause?: number })
 })
 
 // Setup/dependency management handlers

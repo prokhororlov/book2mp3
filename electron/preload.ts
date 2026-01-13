@@ -88,7 +88,7 @@ const electronAPI = {
     text: string,
     voice: string,
     outputPath: string,
-    options: { rate?: string; volume?: string }
+    options: Record<string, unknown>
   ): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('convert-to-speech', text, voice, outputPath, options),
 
@@ -98,8 +98,8 @@ const electronAPI = {
   getFileInfo: (filePath: string): Promise<{ success: boolean; info?: FileInfo; error?: string }> =>
     ipcRenderer.invoke('get-file-info', filePath),
 
-  previewVoice: (text: string, voiceShortName: string): Promise<{ success: boolean; audioData?: string; error?: string }> =>
-    ipcRenderer.invoke('preview-voice', text, voiceShortName),
+  previewVoice: (text: string, voiceShortName: string, options?: Record<string, unknown>): Promise<{ success: boolean; audioData?: string; error?: string }> =>
+    ipcRenderer.invoke('preview-voice', text, voiceShortName, options || {}),
 
   onConversionProgress: (callback: (data: ConversionProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: ConversionProgress) => callback(data)

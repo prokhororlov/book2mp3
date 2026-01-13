@@ -7,6 +7,7 @@ Generates speech audio using Silero models
 import argparse
 import os
 import sys
+import re
 from pathlib import Path
 
 try:
@@ -19,10 +20,35 @@ except ImportError:
 try:
     import scipy.io.wavfile as wavfile
     import numpy as np
+    from scipy import signal
 except ImportError:
     print("Error: scipy/numpy not installed.", file=sys.stderr)
     print("Please install: pip install scipy numpy", file=sys.stderr)
     sys.exit(1)
+
+
+def parse_rate(rate_str):
+    """Parse rate string like '+50%' or '-25%' to a multiplier."""
+    if not rate_str:
+        return 1.0
+    match = re.match(r'^([+-])(\d+)%$', rate_str)
+    if match:
+        sign = match.group(1)
+        percent = int(match.group(2))
+        if sign == '+':
+            return 1.0 + percent / 100
+        else:
+            return 1.0 - percent / 100
+    return 1.0
+
+
+def change_speed(audio, speed_factor):
+    """Change audio speed by resampling."""
+    if speed_factor == 1.0:
+        return audio
+    # Resample to change speed (higher speed = shorter audio)
+    new_length = int(len(audio) / speed_factor)
+    return signal.resample(audio, new_length)
 
 
 def main():
@@ -31,6 +57,7 @@ def main():
     parser.add_argument('--speaker', required=True, help='Speaker model (e.g., v3_1_ru/aidar)')
     parser.add_argument('--output', required=True, help='Output WAV file path')
     parser.add_argument('--sample-rate', type=int, default=48000, help='Sample rate (default: 48000)')
+    parser.add_argument('--rate', type=str, default='', help='Speed adjustment (e.g., +50%, -25%)')
 
     args = parser.parse_args()
 
@@ -88,6 +115,12 @@ def main():
         # Ensure 1D array for mono
         if audio.ndim > 1:
             audio = audio.squeeze()
+
+        # Apply speed change if specified
+        speed_factor = parse_rate(args.rate)
+        if speed_factor != 1.0:
+            print(f"Applying speed factor: {speed_factor}", file=sys.stderr)
+            audio = change_speed(audio, speed_factor)
 
         # Normalize to int16 range
         audio = (audio * 32767).astype(np.int16)

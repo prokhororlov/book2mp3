@@ -6,7 +6,8 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2 } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 // Gender icons as inline SVG components
 const MaleIcon = ({ className }: { className?: string }) => (
@@ -72,6 +73,10 @@ const LANGUAGES = [
   { code: 'en', name: 'English' },
 ]
 
+// Feature flags
+// Set to true to enable Coqui XTTS-v2 in production builds
+const COQUI_ENABLED = import.meta.env.DEV // || true
+
 // Provider icons mapping
 const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   system: <Zap className="h-4 w-4" />,
@@ -86,13 +91,8 @@ function App() {
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [file, setFile] = useState<FileInfo | null>(null)
   const [bookContent, setBookContent] = useState<BookContent | null>(null)
-  // Auto-detect system language, default to Russian
-  const [language, setLanguage] = useState(() => {
-    const systemLang = navigator.language
-    if (systemLang.startsWith('ru')) return 'ru-RU'
-    if (systemLang.startsWith('en')) return 'en'
-    return 'ru-RU' // Default to Russian
-  })
+  // Default to English
+  const [language, setLanguage] = useState('en')
 
   // Check if setup is needed on app start
   useEffect(() => {
@@ -113,7 +113,8 @@ function App() {
       if (!window.electronAPI) return
       try {
         const providers = await window.electronAPI.getAvailableProviders()
-        const providersWithIcons: ProviderInfo[] = providers.map(p => ({
+        const filteredProviders = providers.filter(p => COQUI_ENABLED || p.id !== 'coqui')
+        const providersWithIcons: ProviderInfo[] = filteredProviders.map(p => ({
           ...p,
           icon: PROVIDER_ICONS[p.id] || <Cpu className="h-4 w-4" />
         }))
@@ -130,6 +131,7 @@ function App() {
   const [selectedProvider, setSelectedProvider] = useState<string>('piper')
   const [availableProviders, setAvailableProviders] = useState<ProviderInfo[]>([])
   const [speed, setSpeed] = useState([1.0])
+  const [sentencePause, setSentencePause] = useState([0.0]) // Pause between sentences in seconds (for Piper)
   const [isConverting, setIsConverting] = useState(false)
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState('')
@@ -138,7 +140,7 @@ function App() {
   const getDefaultPreviewText = (lang: string) => {
     return lang.startsWith('en') ? 'Hello! This is an example of how the voice sounds.' : 'Привет! Это пример звучания голоса.'
   }
-  const [previewText, setPreviewText] = useState(() => getDefaultPreviewText(navigator.language.startsWith('en') ? 'en' : 'ru-RU'))
+  const [previewText, setPreviewText] = useState(() => getDefaultPreviewText('en'))
   const [isEditingPreview, setIsEditingPreview] = useState(false)
   const [tempPreviewText, setTempPreviewText] = useState('')
   const [isPreviewing, setIsPreviewing] = useState(false)
@@ -448,11 +450,18 @@ function App() {
     const rateValue = speed[0]
     const rate = rateValue === 1.0 ? '+0%' : rateValue > 1.0 ? `+${Math.round((rateValue - 1) * 100)}%` : `-${Math.round((1 - rateValue) * 100)}%`
 
+    const options: Record<string, unknown> = { rate }
+
+    // Add sentence pause for Piper
+    if (selectedProvider === 'piper' && sentencePause[0] > 0) {
+      options.sentencePause = sentencePause[0]
+    }
+
     const result = await window.electronAPI.convertToSpeech(
       bookContent.fullText,
       selectedVoice,
       outputPath,
-      { rate }
+      options
     )
 
     setIsConverting(false)
@@ -495,7 +504,17 @@ function App() {
     setError(null)
 
     try {
-      const result = await window.electronAPI.previewVoice(previewText, selectedVoice)
+      const rateValue = speed[0]
+      const rate = rateValue === 1.0 ? '+0%' : rateValue > 1.0 ? `+${Math.round((rateValue - 1) * 100)}%` : `-${Math.round((1 - rateValue) * 100)}%`
+
+      const options: Record<string, unknown> = { rate }
+
+      // Add sentence pause for Piper
+      if (selectedProvider === 'piper' && sentencePause[0] > 0) {
+        options.sentencePause = sentencePause[0]
+      }
+
+      const result = await window.electronAPI.previewVoice(previewText, selectedVoice, options)
 
       if (result.success && result.audioData) {
         const audio = new Audio(result.audioData)
@@ -610,6 +629,9 @@ function App() {
     return voice?.isInstalled !== false
   })()
 
+  // Check if any installation is in progress
+  const isAnyInstallationInProgress = isInstallingSilero || isInstallingCoqui || isInstallingPiperCore || isInstallingRHVoiceCore || installingVoice !== null || installingRHVoice !== null
+
   // Show loading while checking setup status
   if (needsSetup === null) {
     return (
@@ -721,12 +743,12 @@ function App() {
                     return (
                       <button
                         key={provider.id}
-                        onClick={() => isAvailable && !isConverting && setSelectedProvider(provider.id)}
-                        disabled={!isAvailable || isConverting}
+                        onClick={() => isAvailable && !isConverting && !isAnyInstallationInProgress && setSelectedProvider(provider.id)}
+                        disabled={!isAvailable || isConverting || isAnyInstallationInProgress}
                         className={`flex flex-col items-center gap-1 border rounded-lg p-3 transition-colors flex-1 min-w-[calc(50%-4px)] sm:min-w-0 ${
                           isSelected ? 'border-primary bg-accent' : 'border-border'
                         } ${
-                          isAvailable && !isConverting ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
+                          isAvailable && !isConverting && !isAnyInstallationInProgress ? 'hover:bg-accent cursor-pointer' : 'opacity-50 cursor-not-allowed'
                         }`}
                       >
                         {provider.icon}
@@ -1087,7 +1109,7 @@ function App() {
                   ) : (
                     <div className="space-y-3">
                       <div className="text-sm text-muted-foreground space-y-1">
-                        <p>For Piper to work, the TTS engine will be installed (~22 MB).</p>
+                        <p>For Piper to work, the TTS engine will be installed.</p>
                       </div>
                       <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded space-y-1">
                         <div className="flex items-center gap-2">
@@ -1095,7 +1117,8 @@ function App() {
                           <span className="font-medium">Voice models installed separately (~20-60 MB each)</span>
                         </div>
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">Initial download: ~22 MB</span>
                         <Button
                           variant="default"
                           size="sm"
@@ -1215,14 +1238,16 @@ function App() {
                 </div>
               )}
 
-              {/* Language & Voice Row */}
+              {/* Language & Voice Row - only show when provider is ready */}
+              {isProviderReady && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Language Selection */}
                 <div className="space-y-1.5">
                   <Label className="text-sm">Language</Label>
-                  <Select value={language} onValueChange={setLanguage} disabled={isConverting}>
-                    <SelectTrigger className="h-9">
+                  <Select value={language} onValueChange={setLanguage} disabled={isConverting || isAnyInstallationInProgress || isLoadingVoices}>
+                    <SelectTrigger className="h-9" showChevron={!isLoadingVoices}>
                       <SelectValue placeholder="Select language" />
+                      {isLoadingVoices && <Loader2 className="h-4 w-4 animate-spin opacity-50" />}
                     </SelectTrigger>
                     <SelectContent>
                       {LANGUAGES.map(lang => (
@@ -1335,6 +1360,12 @@ function App() {
                                       e.stopPropagation()
                                       if (!window.electronAPI) return
 
+                                      // Save previous voice to restore on error
+                                      const previousVoice = selectedVoice
+
+                                      // Set voice as active and close dropdown at start of download
+                                      setSelectedVoice(voice.shortName)
+                                      setVoiceSelectOpen(false)
                                       setInstallingRHVoice(voice.shortName)
                                       setRHVoiceInstallProgress(0)
 
@@ -1349,15 +1380,15 @@ function App() {
                                           // Reload voices to update installed status
                                           const loadedVoices = await window.electronAPI.getVoices(language)
                                           setVoices(loadedVoices)
-                                          // Select the newly installed voice
-                                          setSelectedVoice(voice.shortName)
-                                          // Close the dropdown
-                                          setVoiceSelectOpen(false)
                                         } else {
                                           setError(result.error || 'Voice installation failed')
+                                          // Restore previous voice on error
+                                          setSelectedVoice(previousVoice)
                                         }
                                       } catch (err) {
                                         setError((err as Error).message)
+                                        // Restore previous voice on error
+                                        setSelectedVoice(previousVoice)
                                       } finally {
                                         setInstallingRHVoice(null)
                                         setRHVoiceInstallProgress(0)
@@ -1425,6 +1456,12 @@ function App() {
                                       e.stopPropagation()
                                       if (!window.electronAPI) return
 
+                                      // Save previous voice to restore on error
+                                      const previousVoice = selectedVoice
+
+                                      // Set voice as active and close dropdown at start of download
+                                      setSelectedVoice(voice.shortName)
+                                      setVoiceSelectOpen(false)
                                       setInstallingVoice(voice.shortName)
                                       setVoiceInstallProgress(0)
 
@@ -1445,15 +1482,15 @@ function App() {
                                           // Reload voices to update installed status
                                           const loadedVoices = await window.electronAPI.getVoices(language)
                                           setVoices(loadedVoices)
-                                          // Select the newly installed voice
-                                          setSelectedVoice(voice.shortName)
-                                          // Close the dropdown
-                                          setVoiceSelectOpen(false)
                                         } else {
                                           setError(result.error || 'Voice installation failed')
+                                          // Restore previous voice on error
+                                          setSelectedVoice(previousVoice)
                                         }
                                       } catch (err) {
                                         setError((err as Error).message)
+                                        // Restore previous voice on error
+                                        setSelectedVoice(previousVoice)
                                       } finally {
                                         setInstallingVoice(null)
                                         setVoiceInstallProgress(0)
@@ -1492,101 +1529,157 @@ function App() {
                         <Play className="h-4 w-4" />
                       )}
                     </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Preview & Speed Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Preview Text */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm">Preview</Label>
-                    {!isEditingPreview && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={startEditingPreview}
-                        className="h-6 w-6"
-                        disabled={!isProviderReady || isConverting || isPreviewing}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
-                  {!isEditingPreview ? (
-                    <div className="text-xs text-muted-foreground italic truncate">
-                      "{previewText}"
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <textarea
-                        value={tempPreviewText}
-                        onChange={(e) => setTempPreviewText(e.target.value)}
-                        className="w-full p-2 text-sm border rounded-md bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-                        rows={2}
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            savePreviewText()
-                          }
-                          if (e.key === 'Escape') {
-                            cancelEditingPreview()
-                          }
-                        }}
-                      />
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={cancelEditingPreview} className="h-6 px-2 text-xs">
-                          Cancel
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9"
+                          disabled={isConverting || installingVoice !== null || installingRHVoice !== null}
+                          title="Playback settings"
+                        >
+                          <Settings className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={savePreviewText} className="h-6 px-2 text-xs">
-                          <Check className="h-3 w-3 mr-1" />
-                          Save
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80" align="end">
+                        <div className="space-y-4">
+                          <h4 className="font-medium text-sm">Playback Settings</h4>
 
-                {/* Speed Control */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm">Speed</Label>
-                    <span className="text-xs text-muted-foreground">
-                      {speed[0].toFixed(1)}x
-                    </span>
-                  </div>
-                  <div className="relative pb-8">
-                    <Slider
-                      value={speed}
-                      onValueChange={setSpeed}
-                      min={0.5}
-                      max={2.0}
-                      step={0.1}
-                      disabled={!isProviderReady || isConverting}
-                    />
-                    {/* Breakpoint marks with labels - left/right 8px = thumb radius */}
-                    <div className="absolute left-2 right-2 top-[16px] pointer-events-none">
-                      {[0.5, 1.0, 1.5, 2.0].map((val) => {
-                        const percent = ((val - 0.5) / 1.5) * 100
-                        return (
-                          <div
-                            key={val}
-                            className="absolute flex flex-col items-center -translate-x-1/2"
-                            style={{ left: `${percent}%` }}
-                          >
-                            <div className="w-px h-1.5 bg-muted-foreground/50" />
-                            <span className="text-[9px] text-muted-foreground/60 mt-0.5">
-                              {val.toFixed(1)}
-                            </span>
+                          {/* Speed Control */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-sm">Speed</Label>
+                              <span className="text-xs text-muted-foreground">
+                                {speed[0].toFixed(1)}x
+                              </span>
+                            </div>
+                            <Slider
+                              value={speed}
+                              onValueChange={setSpeed}
+                              min={0.5}
+                              max={2.0}
+                              step={0.1}
+                              disabled={isConverting}
+                            />
+                            <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                              <span>0.5x</span>
+                              <span>1.0x</span>
+                              <span>1.5x</span>
+                              <span>2.0x</span>
+                            </div>
                           </div>
-                        )
-                      })}
-                    </div>
+
+                          {/* Sentence Pause (Piper only) */}
+                          {selectedProvider === 'piper' && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-sm">Sentence Pause</Label>
+                                <span className="text-xs text-muted-foreground">
+                                  {sentencePause[0].toFixed(1)}s
+                                </span>
+                              </div>
+                              <Slider
+                                value={sentencePause}
+                                onValueChange={setSentencePause}
+                                min={0}
+                                max={2.0}
+                                step={0.1}
+                                disabled={isConverting}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                                <span>0s</span>
+                                <span>0.5s</span>
+                                <span>1.0s</span>
+                                <span>1.5s</span>
+                                <span>2.0s</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Preview Text */}
+                          <div className="space-y-2">
+                            <Label className="text-sm">Preview Text</Label>
+                            <div
+                              className={`relative text-xs italic border rounded-md transition-colors py-2 px-2 ${
+                                isEditingPreview
+                                  ? 'border-ring bg-background'
+                                  : 'bg-muted/30 text-muted-foreground'
+                              }`}
+                            >
+                              {!isEditingPreview ? (
+                                <span className="block pr-8">{previewText}</span>
+                              ) : (
+                                <textarea
+                                  value={tempPreviewText}
+                                  onChange={(e) => setTempPreviewText(e.target.value.slice(0, 500))}
+                                  maxLength={500}
+                                  className="w-full pr-8 text-xs italic bg-transparent resize-none focus:outline-none text-foreground leading-[inherit] p-0 m-0 block"
+                                  style={{ fieldSizing: 'content' } as React.CSSProperties}
+                                  rows={1}
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault()
+                                      savePreviewText()
+                                    }
+                                    if (e.key === 'Escape') {
+                                      cancelEditingPreview()
+                                    }
+                                  }}
+                                />
+                              )}
+                              <div className="absolute top-1 right-1 flex gap-0.5">
+                                {!isEditingPreview ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-foreground hover:text-foreground hover:bg-transparent"
+                                    onClick={startEditingPreview}
+                                    disabled={isConverting || isPreviewing}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                ) : (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground hover:bg-transparent"
+                                      onClick={cancelEditingPreview}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground hover:bg-transparent"
+                                      onClick={savePreviewText}
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
               </div>
+              )}
+
+              {/* Installation Warning */}
+              {isAnyInstallationInProgress && (
+                <div className="flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs">
+                    <p className="font-medium">Installation in progress</p>
+                    <p className="text-amber-600/80 dark:text-amber-400/80 mt-0.5">Please do not close the application until the installation is complete to avoid corrupted files.</p>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1620,13 +1713,13 @@ function App() {
           </Card>
         )}
 
-        {/* Action Buttons - disabled when provider is not ready */}
-        {file && bookContent && (
+        {/* Action Buttons - hidden when provider is not ready */}
+        {file && bookContent && isProviderReady && (
           <div className="w-full">
             {!isConverting ? (
               <Button
                 onClick={handleConvert}
-                disabled={!isProviderReady || !isSelectedVoiceValid}
+                disabled={!isSelectedVoiceValid}
                 className="w-full h-12 text-base gap-2"
               >
                 <Play className="h-5 w-5" />
