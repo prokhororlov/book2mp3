@@ -1031,7 +1031,7 @@ function App() {
 
               {/* Coqui Setup Notice */}
               {selectedProvider === 'coqui' && !coquiInstalled && (
-                <div className="space-y-2 p-3 border rounded-md bg-muted/50">
+                <div className="space-y-3 p-4 border rounded-md bg-muted/50">
                   <div className="flex items-center gap-2">
                     <Wand2 className="h-4 w-4 text-primary" />
                     <span className="font-medium text-sm">Coqui XTTS-v2 Setup Required</span>
