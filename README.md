@@ -6,8 +6,8 @@ Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech 
 
 ## Features
 
-- **Five TTS providers** - System (Windows SAPI), Piper, Silero, ElevenLabs and Coqui
-- **Multiple voices** - 20+ voices in Russian and English
+- **Five TTS providers** - RHVoice, Piper, Silero, Coqui XTTS-v2 and ElevenLabs
+- **60+ voices** - Multiple voices in Russian and English
 - **Format support** - FB2, EPUB, TXT
 - **Speed control** - from 0.5x to 2.0x
 - **Dark theme** - light/dark/system theme support
@@ -15,52 +15,74 @@ Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech 
 
 ## TTS Providers
 
-### 1. System (Windows SAPI)
-**Speed: Fast | Quality: Varies**
+### 1. RHVoice
+**Speed: Fast | Quality: Good | Offline**
 
-Uses any Windows SAPI voices installed on your system. The app automatically detects all available Russian and English voices.
-
-#### Installing additional voices:
-- **RHVoice** - [Download voices](https://github.com/RHVoice/RHVoice/releases)
-- **Microsoft voices** - Available in Windows Settings → Time & Language → Speech
-- Any other SAPI-compatible voices
-
-### 2. Piper (ONNX models)
-**Speed: Medium | Quality: Good**
-
-Local neural ONNX models. Good balance of speed and quality.
+Lightweight offline engine based on Windows SAPI with minimal installation size (~15 MB per voice). Provides instant speech generation with very low CPU usage, making it perfect for converting large books quickly.
 
 #### Russian voices:
-- Denis, Dmitri (Male)
-- Irina, Ruslan (Female/Male)
+- Aleksandr (Male)
+- Irina, Anna, Elena (Female)
 
 #### English voices:
-- Lessac, Ryan (Male)
-- Amy (Female)
+- Bdl, Alan (Male)
+- Slt, Clb (Female)
+
+Download: [RHVoice releases](https://github.com/RHVoice/RHVoice/releases)
+
+### 2. Piper (ONNX models)
+**Speed: Fast | Quality: Good | Offline**
+
+Neural TTS engine powered by ONNX Runtime. Offers excellent voice quality with fast generation — processes text 10-50x faster than real-time on most CPUs.
+
+#### Russian voices (4):
+- Denis, Dmitri, Ruslan (Male)
+- Irina (Female)
+
+#### English voices (29):
+**US voices:** Amy, Kathleen, Kristin, HFC Female, LJSpeech (Female) • Arctic, Bryce, Danny, HFC Male, Joe, John, Kusal, L2Arctic, Lessac, LibriTTS, Norman, Reza Ibrahim, Ryan, Sam (Male)
+
+**GB voices:** Alba, Cori, Jenny Dioco, Southern English Female (Female) • Alan, Aru, Northern English Male, Semaine, VCTK (Male)
 
 Download models: [Piper Voices](https://github.com/rhasspy/piper/releases/tag/v1.2.0)
 
 ### 3. Silero (PyTorch)
-**Speed: Slow | Quality: Best**
+**Speed: Medium | Quality: Excellent | Offline**
 
-PyTorch models from Silero Team. Best offline quality.
+Advanced neural TTS engine built on PyTorch. Delivers natural, expressive speech with excellent prosody.
 
-#### Russian voices:
+#### Russian voices (5):
 - Aidar, Eugene (Male)
 - Baya, Kseniya, Xenia (Female)
 
-#### English voices:
-- LJ (Female)
-- VCTK (Male)
+#### English voices (4):
+- Male 1, Male 2 (Male)
+- Female 1, Female 2 (Female)
 
 Models download automatically on first use (~100-200 MB).
 
-### 4. ElevenLabs (Cloud API)
-**Speed: Fast | Quality: Premium**
+### 4. Coqui XTTS-v2
+**Speed: Slow | Quality: Premium | Offline**
 
-Cloud-based AI voices with premium quality. Requires API key.
+State-of-the-art multilingual model with 14 built-in speaker voices. Produces the most natural-sounding speech among local engines with exceptional emotional range and prosody.
 
-#### Voices available:
+#### Voices (14, same for all languages):
+**Female:** Claribel Dervla, Daisy Studious, Gracie Wise, Tammie Ema, Alison Dietlinde, Ana Florence, Annmarie Nele, Asya Anara
+
+**Male:** Andrew Chipper, Badr Odhiambo, Dionisio Schuyler, Royston Min, Viktor Eka, Abrahan Mack
+
+Supports 17 languages including Russian, English, Spanish, French, German, Italian, Portuguese, Polish, Turkish, Dutch, Czech, Arabic, Chinese, Japanese, Hungarian, Korean, and Hindi.
+
+### 5. ElevenLabs (Cloud API)
+**Speed: Fast | Quality: Premium | Online**
+
+Premium cloud-based TTS with cutting-edge AI voice synthesis. Offers studio-quality output with remarkable naturalness.
+
+#### Russian voices:
+- Adam (Male)
+- Rachel (Female)
+
+#### English voices:
 - Adam, Josh, Sam (Male)
 - Rachel, Domi, Bella (Female)
 
@@ -77,8 +99,8 @@ ELEVENLABS_API_KEY=your_api_key_here
 ### Prerequisites
 
 - Node.js 18+
-- Windows 10/11 (for System SAPI voices)
-- Python 3.9+ (for Silero, optional)
+- Windows 10/11
+- Python 3.9+ (for Silero and Coqui)
 
 ### Quick Start
 
@@ -106,11 +128,15 @@ powershell .\scripts\setup-all.ps1
 ```
 
 This will install:
-- Piper TTS (required)
-- FFmpeg (required)
-- Silero TTS (optional)
+- Piper TTS
+- FFmpeg
+- Silero TTS
+- Coqui XTTS-v2
 
 4. **Download voice models**
+
+#### For RHVoice:
+Download and install from [RHVoice releases](https://github.com/RHVoice/RHVoice/releases). Voices will be automatically detected after installation.
 
 #### For Piper:
 Download voices from [Piper releases](https://github.com/rhasspy/piper/releases/tag/v1.2.0) and extract to:
@@ -135,15 +161,15 @@ tts_resources/
             en_US-lessac-medium.onnx.json
 ```
 
-#### For System SAPI:
-Install any SAPI-compatible voices (RHVoice, Microsoft, etc.). After installation they will be automatically detected by the app.
-
 #### For Silero:
 Models download automatically on first use (~100-200 MB).
 ```bash
 # Install only Silero
 npm run setup:silero
 ```
+
+#### For Coqui XTTS-v2:
+Model downloads automatically on first use (~2 GB). Requires Python 3.9+ and GPU recommended for faster generation.
 
 #### For ElevenLabs:
 Add your API key to `.env` file:
@@ -173,54 +199,65 @@ book-to-mp3/
 │   ├── preload.ts         # Preload script
 │   └── services/
 │       ├── parser.ts      # Book parsing
+│       ├── setup.ts       # TTS setup service
 │       └── tts.ts         # Unified TTS service
 ├── src/                   # React frontend
 │   ├── App.tsx           # Main component
 │   └── components/       # UI components
 ├── tts_resources/        # TTS resources
 │   ├── piper/           # Piper TTS
-│   ├── silero/          # Silero TTS (optional)
-│   └── ffmpeg/          # FFmpeg for conversion
+│   ├── silero/          # Silero TTS
+│   ├── coqui/           # Coqui XTTS-v2
+│   ├── ffmpeg/          # FFmpeg for conversion
+│   └── tts_server.py    # Python TTS server
 ├── scripts/
 │   ├── setup-all.ps1    # Universal setup
 │   ├── setup-silero.ps1 # Setup only Silero
+│   ├── release.cjs      # Release automation
 │   └── silero_generate.py # Python script for Silero
 └── .env                 # Environment variables (API keys)
 ```
 
 ## Performance
 
-| Provider    | Speed    | Quality    | Model Size   | Type  | Recommendation          |
-|-------------|----------|------------|--------------|-------|-------------------------|
-| System      | Fast     | Varies     | N/A          | CPU   | For quick processing    |
-| Piper       | Medium   | Good       | ~50 MB       | CPU   | Balanced option         |
-| Silero      | Slow     | Best       | ~100-200 MB  | CPU   | Best offline quality    |
-| ElevenLabs  | Fast     | Premium    | Cloud        | API   | Best overall quality    |
-| Coqui       | Slow     | Excellent  | ~2 GB        | CPU   | Voice cloning support   |
+| Provider    | Speed    | Quality    | Model Size   | Type     | Recommendation            |
+|-------------|----------|------------|--------------|----------|---------------------------|
+| RHVoice     | Fast     | Good       | ~15 MB       | CPU      | Quick processing          |
+| Piper       | Fast     | Good       | ~50 MB       | CPU      | Balanced option           |
+| Silero      | Medium   | Excellent  | ~100-200 MB  | CPU      | Natural Russian voices    |
+| Coqui       | Slow     | Premium    | ~2 GB        | CPU/GPU  | Best offline quality      |
+| ElevenLabs  | Fast     | Premium    | Cloud        | API      | Best overall quality      |
 
 ### Parallelization
 
-- **System**: up to 30 parallel threads
+- **RHVoice**: up to 30 parallel threads
 - **Piper**: up to 10 parallel threads
 - **Silero**: up to 5 parallel threads
+- **Coqui**: 1 thread (sequential processing)
 - **ElevenLabs**: up to 3 parallel requests
 
 ## Troubleshooting
+
+### RHVoice not working
+- Install RHVoice from [official releases](https://github.com/RHVoice/RHVoice/releases)
+- Restart application after installation
+- Voices are detected automatically via Windows SAPI
 
 ### Piper not working
 - Make sure voice models are downloaded
 - Check directory structure
 - `.onnx` and `.onnx.json` files must be in same folder
 
-### System voices not showing
-- Install SAPI-compatible voices (RHVoice, Microsoft, etc.)
-- Restart application after installation
-- Check that voices are visible in Windows Settings → Time & Language → Speech
-
 ### Silero slow generation
 - Normal - it uses PyTorch models
 - First run downloads models (~100-200 MB)
-- For large books consider Piper
+- For large books consider Piper or RHVoice
+
+### Coqui XTTS-v2 issues
+- First run downloads ~2 GB model
+- GPU recommended for faster generation
+- Requires Python 3.9+
+- Check that `tts_resources/coqui/venv` exists
 
 ### ElevenLabs not working
 - Check that API key is set in `.env` file
@@ -237,8 +274,9 @@ MIT
 
 ## Acknowledgements
 
-- [RHVoice](https://github.com/RHVoice) - Quality SAPI voices
-- [Piper](https://github.com/rhasspy/piper) - Fast ONNX models
-- [Silero](https://github.com/snakers4/silero-models) - Excellent PyTorch models
+- [RHVoice](https://github.com/RHVoice/RHVoice) - Lightweight SAPI voices
+- [Piper](https://github.com/rhasspy/piper) - Fast ONNX TTS models
+- [Silero](https://github.com/snakers4/silero-models) - Natural PyTorch voices
+- [Coqui TTS](https://github.com/coqui-ai/TTS) - State-of-the-art XTTS-v2 model
 - [ElevenLabs](https://elevenlabs.io/) - Premium cloud TTS
 - [FFmpeg](https://ffmpeg.org/) - Audio conversion
