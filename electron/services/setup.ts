@@ -1191,7 +1191,7 @@ export async function installSilero(
       // Upgrade pip only for fresh venv
       onProgress({
         stage: 'silero',
-        progress: 10,
+        progress: 8,
         details: 'Upgrading pip...'
       })
 
@@ -1202,62 +1202,31 @@ export async function installSilero(
     } else {
       onProgress({
         stage: 'silero',
-        progress: 10,
+        progress: 8,
         details: 'Using existing virtual environment...'
       })
     }
 
-    // Install PyTorch CPU - this is the longest step (10% to 75%)
-    // PyTorch is ~200MB, torchaudio is ~5MB
+    // Install PyTorch CPU
     onProgress({
       stage: 'silero',
-      progress: 15,
-      details: 'Downloading PyTorch (this may take several minutes)...'
+      progress: 10,
+      details: 'Installing PyTorch (CPU)...'
     })
 
     const pytorchResult = await runPipWithProgress(
       venvPython,
-      'torch torchaudio',
+      'torch torchvision torchaudio',
       {
         indexUrl: 'https://download.pytorch.org/whl/cpu',
         timeout: 600000,
         onProgress: (info) => {
-          // Map pip progress to our 15-75% range for PyTorch installation
-          const baseProgress = 15
-          const rangeSize = 60 // 15% to 75%
-          
-          let subProgress = 0
-          if (info.phase === 'collecting') {
-            subProgress = 0
-          } else if (info.phase === 'downloading') {
-            // Downloading is 0-80% of the subprocess
-            subProgress = (info.percentage || 0) * 0.8
-          } else if (info.phase === 'installing') {
-            subProgress = 85
-          } else if (info.phase === 'processing') {
-            subProgress = 100
-          }
-          
-          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
-          
+          const progress = 10 + Math.round((info.percentage || 0) * 0.5)
           let details = 'Installing PyTorch...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
-            if (info.downloaded !== undefined && info.total !== undefined) {
-              details = `Downloading ${info.package}: ${info.downloaded.toFixed(1)}/${info.total.toFixed(1)} MB (${info.percentage}%)`
-            } else {
-              details = `Downloading ${info.package}: ${info.percentage}%`
-            }
-          } else if (info.phase === 'collecting') {
-            details = `Resolving dependencies: ${info.package}...`
-          } else if (info.phase === 'installing') {
-            details = 'Installing downloaded packages...'
+            details = `Downloading ${info.package}: ${info.percentage}%`
           }
-          
-          onProgress({
-            stage: 'silero',
-            progress: totalProgress,
-            details
-          })
+          onProgress({ stage: 'silero', progress, details })
         }
       }
     )
@@ -1266,10 +1235,10 @@ export async function installSilero(
       return { success: false, error: pytorchResult.error || 'Failed to install PyTorch' }
     }
 
-    // Install additional dependencies (75% to 90%)
+    // Install additional dependencies (60% to 85%)
     onProgress({
       stage: 'silero',
-      progress: 75,
+      progress: 60,
       details: 'Installing additional dependencies...'
     })
 
@@ -1279,32 +1248,12 @@ export async function installSilero(
       {
         timeout: 180000,
         onProgress: (info) => {
-          const baseProgress = 75
-          const rangeSize = 15 // 75% to 90%
-          
-          let subProgress = 0
-          if (info.phase === 'downloading' && info.percentage !== undefined) {
-            subProgress = info.percentage * 0.8
-          } else if (info.phase === 'installing') {
-            subProgress = 85
-          } else if (info.phase === 'processing') {
-            subProgress = 100
-          }
-          
-          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
-          
+          const progress = 60 + Math.round((info.percentage || 0) * 0.25)
           let details = 'Installing dependencies...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             details = `Downloading ${info.package}: ${info.percentage}%`
-          } else if (info.phase === 'collecting') {
-            details = `Resolving: ${info.package}...`
           }
-          
-          onProgress({
-            stage: 'silero',
-            progress: totalProgress,
-            details
-          })
+          onProgress({ stage: 'silero', progress, details })
         }
       }
     )
@@ -1316,7 +1265,7 @@ export async function installSilero(
     // Copy generate.py script
     onProgress({
       stage: 'silero',
-      progress: 92,
+      progress: 88,
       details: 'Setting up generation script...'
     })
 
@@ -1331,7 +1280,7 @@ export async function installSilero(
     // Verify installation
     onProgress({
       stage: 'silero',
-      progress: 96,
+      progress: 94,
       details: 'Verifying installation...'
     })
 
@@ -1454,11 +1403,13 @@ def main():
 
         print(f"Generating audio for text length: {len(args.text)} characters", file=sys.stderr)
 
-        # Generate audio
+        # Generate audio with auto-stress and yo placement for Russian
         audio = model.apply_tts(
             text=args.text,
             speaker=speaker,
-            sample_rate=args.sample_rate
+            sample_rate=args.sample_rate,
+            put_accent=True,
+            put_yo=True
         )
 
         # Save to WAV file
@@ -1855,11 +1806,20 @@ export async function installCoqui(
 import sys
 os.environ["COQUI_TOS_AGREED"] = "1"
 
+# Fix for PyTorch 2.6+ weights_only default change
+import torch
+_orig_load = torch.load
+def _patched_load(*a, **kw):
+    if 'weights_only' not in kw:
+        kw['weights_only'] = False
+    return _orig_load(*a, **kw)
+torch.load = _patched_load
+
 # Simple progress tracking for model download
 class ProgressTracker:
     def __init__(self):
         self.last_percent = -1
-    
+
     def update(self, current, total):
         if total > 0:
             percent = int((current / total) * 100)
@@ -1970,6 +1930,15 @@ from pathlib import Path
 
 os.environ["COQUI_TOS_AGREED"] = "1"
 
+# Fix for PyTorch 2.6+ weights_only default change
+import torch
+_orig_load = torch.load
+def _patched_load(*a, **kw):
+    if 'weights_only' not in kw:
+        kw['weights_only'] = False
+    return _orig_load(*a, **kw)
+torch.load = _patched_load
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--text', required=True)
@@ -1978,7 +1947,6 @@ def main():
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
 
-    import torch
     from TTS.api import TTS
 
     # Normalize language code (app uses ru-RU, XTTS uses ru)
@@ -2038,7 +2006,57 @@ torch.load = _patched_load
 app = Flask(__name__)
 models = {"silero": {"ru": None, "en": None}, "coqui": None}
 coqui_lock = threading.Lock()
-device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def detect_device():
+    """Detect best available compute device. Priority: CUDA > Intel XPU > DirectML > CPU"""
+    device_info = {"device": "cpu", "backend": "cpu", "gpu_name": None}
+
+    # 1. Try CUDA (NVIDIA)
+    if torch.cuda.is_available():
+        try:
+            device_info = {
+                "device": "cuda",
+                "backend": "cuda",
+                "gpu_name": torch.cuda.get_device_name(0)
+            }
+            return device_info
+        except:
+            pass
+
+    # 2. Try Intel XPU
+    try:
+        import intel_extension_for_pytorch as ipex
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            device_info = {
+                "device": "xpu",
+                "backend": "xpu",
+                "gpu_name": torch.xpu.get_device_name(0) if hasattr(torch.xpu, 'get_device_name') else "Intel XPU"
+            }
+            return device_info
+    except ImportError:
+        pass
+
+    # 3. DirectML (via ONNX Runtime) - note: Silero uses PyTorch, so DirectML helps only for ONNX models
+    try:
+        import onnxruntime as ort
+        providers = ort.get_available_providers()
+        if 'DmlExecutionProvider' in providers:
+            device_info = {
+                "device": "cpu",  # PyTorch still uses CPU
+                "backend": "directml",
+                "gpu_name": "DirectML (ONNX Runtime)"
+            }
+            return device_info
+    except ImportError:
+        pass
+
+    return device_info
+
+_device_info = detect_device()
+device = _device_info["device"]
+backend = _device_info["backend"]
+gpu_name = _device_info["gpu_name"]
+print(f"Using device: {device}, backend: {backend}, GPU: {gpu_name}", file=sys.stderr)
 
 def get_memory_gb():
     return psutil.Process().memory_info().rss / (1024**3)
@@ -2046,12 +2064,12 @@ def get_memory_gb():
 def parse_rate(rate_str):
     if not rate_str:
         return 1.0
-    m = re.match(r'^([+-])(\\\\d+)%$', str(rate_str))
+    m = re.match(r'^([+-])(\\d+)%$', str(rate_str))
     if m:
         return 1.0 + int(m.group(2)) / 100 if m.group(1) == '+' else 1.0 - int(m.group(2)) / 100
     try:
         return float(rate_str)
-    except:
+    except Exception:
         return 1.0
 
 def change_speed(audio, factor):
@@ -2072,16 +2090,16 @@ def load_silero_model(lang):
     model_name = 'v5_ru' if lang == 'ru' else 'v3_en'
     print(f"Loading Silero {model_name}...", file=sys.stderr)
     model, _ = torch.hub.load('snakers4/silero-models', 'silero_tts', language=lang, speaker=model_name)
-    model.to(torch.device('cpu'))
+    model.to(torch.device(device))
     models["silero"][lang] = model
-    print(f"Silero {lang} loaded. Memory: {get_memory_gb():.2f} GB", file=sys.stderr)
+    print(f"Silero {lang} loaded on {device}. Memory: {get_memory_gb():.2f} GB", file=sys.stderr)
 
 def generate_silero(text, speaker, lang, rate=1.0, sr=48000):
     if models["silero"].get(lang) is None:
-        load_silero_model(lang)
+        raise RuntimeError(f"Silero model for '{lang}' is not loaded. Please load it first.")
     model = models["silero"][lang]
     spk = speaker.split('/')[-1] if '/' in speaker else speaker
-    audio = model.apply_tts(text=text, speaker=spk, sample_rate=sr)
+    audio = model.apply_tts(text=text, speaker=spk, sample_rate=sr, put_accent=True, put_yo=True)
     if isinstance(audio, torch.Tensor):
         audio = audio.numpy()
     if audio.ndim > 1:
@@ -2106,7 +2124,7 @@ def generate_coqui(text, speaker, lang):
         l = 'en'
     with coqui_lock:
         if models["coqui"] is None:
-            load_coqui_model()
+            raise RuntimeError("Coqui model is not loaded. Please load it first.")
         import tempfile
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             tmp = f.name
@@ -2123,7 +2141,10 @@ def status():
     return jsonify({
         "silero": {"ru_loaded": models["silero"]["ru"] is not None, "en_loaded": models["silero"]["en"] is not None},
         "coqui": {"loaded": models["coqui"] is not None},
-        "memory_gb": round(get_memory_gb(), 2), "device": device
+        "memory_gb": round(get_memory_gb(), 2),
+        "device": device,
+        "backend": backend,
+        "gpu_name": gpu_name
     })
 
 @app.route("/load", methods=["POST"])
@@ -2158,6 +2179,8 @@ def unload_model():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        torch.xpu.empty_cache()
     return jsonify({"success": True, "memory_gb": round(get_memory_gb(), 2)})
 
 @app.route("/generate", methods=["POST"])
@@ -2173,7 +2196,8 @@ def generate():
     except Exception as e:
         import traceback
         traceback.print_exc(file=sys.stderr)
-        return jsonify({"error": str(e)}), 500
+        error_msg = str(e) or repr(e) or "Unknown error occurred"
+        return jsonify({"error": error_msg}), 500
 
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
@@ -2182,6 +2206,8 @@ def shutdown():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        torch.xpu.empty_cache()
     threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
     return jsonify({"success": True})
 

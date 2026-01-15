@@ -14,6 +14,36 @@ const TEMP_AUDIO_DIR_NAME = 'bookify_tts_temp'
 // Track last used output directory for cleanup
 let lastOutputDir: string | null = null
 
+// Preview abort control
+let currentPreviewProcess: ChildProcess | null = null
+let currentPreviewRequest: http.ClientRequest | null = null
+let previewAborted = false
+
+// Abort current preview generation
+export function abortPreview(): void {
+  previewAborted = true
+
+  // Kill the process if running
+  if (currentPreviewProcess) {
+    try {
+      currentPreviewProcess.kill('SIGTERM')
+    } catch {
+      // Process may have already exited
+    }
+    currentPreviewProcess = null
+  }
+
+  // Abort HTTP request if running
+  if (currentPreviewRequest) {
+    try {
+      currentPreviewRequest.destroy()
+    } catch {
+      // Request may have already completed
+    }
+    currentPreviewRequest = null
+  }
+}
+
 // Cleanup temp audio directory
 export function cleanupTempAudio(outputDir?: string): void {
   const dirsToClean: string[] = []
@@ -115,7 +145,7 @@ function getTTSServerPythonExecutable(): string {
   return getSileroPythonExecutable()
 }
 
-async function waitForServer(maxAttempts: number = 30, delayMs: number = 500): Promise<boolean> {
+async function waitForServer(maxAttempts: number = 60, delayMs: number = 500): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const status = await getTTSServerStatus()
@@ -341,6 +371,34 @@ async function generateViaServer(
   fs.writeFileSync(outputPath, audioBuffer)
 }
 
+// Abortable version for preview
+async function generateViaServerForPreview(
+  engine: 'silero' | 'coqui',
+  text: string,
+  speaker: string,
+  language: string,
+  outputPath: string,
+  rate?: string | number
+): Promise<void> {
+  const body = JSON.stringify({
+    engine,
+    text,
+    speaker,
+    language,
+    rate
+  })
+
+  const audioBuffer = await httpRequestBinaryForPreview(`${TTS_SERVER_URL}/generate`, 'POST', body)
+
+  // Ensure output directory exists
+  const outputDir = path.dirname(outputPath)
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true })
+  }
+
+  fs.writeFileSync(outputPath, audioBuffer)
+}
+
 function httpRequest(url: string, method: string, body?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url)
@@ -409,6 +467,55 @@ function httpRequestBinary(url: string, method: string, body?: string): Promise<
 
     req.on('error', reject)
     req.setTimeout(120000, () => {
+      req.destroy()
+      reject(new Error('Request timeout'))
+    })
+
+    if (body) {
+      req.write(body)
+    }
+    req.end()
+  })
+}
+
+// Abortable version for preview - stores request reference for cancellation
+function httpRequestBinaryForPreview(url: string, method: string, body?: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url)
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path: urlObj.pathname,
+      method,
+      headers: body ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      } : {}
+    }
+
+    const req = http.request(options, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', chunk => chunks.push(chunk))
+      res.on('end', () => {
+        currentPreviewRequest = null
+        const buffer = Buffer.concat(chunks)
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(buffer)
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${buffer.toString()}`))
+        }
+      })
+    })
+
+    // Store reference for abort
+    currentPreviewRequest = req
+
+    req.on('error', (err) => {
+      currentPreviewRequest = null
+      reject(err)
+    })
+    req.setTimeout(120000, () => {
+      currentPreviewRequest = null
       req.destroy()
       reject(new Error('Request timeout'))
     })
@@ -660,31 +767,31 @@ export function getAvailableProviders(): Array<{ id: TTSProvider; name: string; 
     {
       id: 'rhvoice',
       name: 'RHVoice',
-      description: 'Легковесный офлайн-движок на базе Windows SAPI. Минимальный размер установки, мгновенная генерация речи. Отлично подходит для быстрой озвучки больших текстов.',
+      description: 'Lightweight offline engine based on Windows SAPI with minimal installation size (~15 MB per voice). Provides instant speech generation with very low CPU usage, making it perfect for converting large books quickly. Fully offline operation — no internet connection required. Supports Russian, English, and several other languages with clear, intelligible voices. Ideal choice for users who prioritize speed and simplicity.',
       requiresSetup: true
     },
     {
       id: 'piper',
       name: 'Piper',
-      description: 'Нейросетевой синтез на базе ONNX Runtime. Высокое качество звучания при быстрой генерации речи. Компактные голосовые модели, полностью офлайн работа на CPU.',
+      description: 'Neural TTS engine powered by ONNX Runtime, developed by Rhasspy. Offers excellent voice quality with fast generation speed — processes text 10-50x faster than real-time on most CPUs. Features compact voice models (15-100 MB each), supports 30+ languages with multiple voice options per language. Fully offline, no internet required.',
       requiresSetup: true
     },
     {
       id: 'silero',
       name: 'Silero',
-      description: 'Продвинутый нейросетевой движок на PyTorch. Естественное и выразительное звучание, множество голосов. Работает офлайн, требует больше времени на генерацию.',
+      description: 'Advanced neural TTS engine built on PyTorch by Silero Team. Delivers natural, expressive speech with excellent prosody and intonation. Russian model (v5) includes 5 high-quality voices, English model (v3) offers 118 diverse voices. Works completely offline, though generation is slower than Piper — best for shorter texts or when quality is priority.',
       requiresSetup: true
     },
     {
       id: 'coqui',
       name: 'Coqui XTTS-v2',
-      description: 'Продвинутая мультиязычная модель с 55+ встроенными голосами. Высочайшее качество синтеза, поддержка множества языков. Требует ~4GB места и GPU для ускорения.',
+      description: 'State-of-the-art multilingual model with 55 built-in speaker voices across 17 languages including English, Spanish, French, German, Italian, Portuguese, Polish, Turkish, Russian, Dutch, Czech, Arabic, Chinese, Japanese, Hungarian, Korean, and Hindi. Produces the most natural-sounding speech among local engines with exceptional emotional range and prosody.',
       requiresSetup: true
     },
     {
       id: 'elevenlabs',
       name: 'ElevenLabs',
-      description: 'Премиум облачный сервис с передовыми технологиями синтеза. Превосходное качество, возможность клонирования голоса. Требует API-ключ и подключение к интернету.',
+      description: 'Premium cloud-based TTS service with cutting-edge AI voice synthesis technology. Offers studio-quality output with remarkable naturalness, emotion control, and voice cloning capabilities. Access to thousands of community voices plus ability to create custom voices. Requires API key and internet connection; usage is metered based on character count.',
       requiresSetup: false
     }
   ]
@@ -1085,6 +1192,242 @@ async function generateSpeechWithCoqui(
   })
 }
 
+// ============= Abortable Preview Versions =============
+
+// RHVoice abortable version for preview
+async function generateSpeechWithRHVoiceForPreview(
+  text: string,
+  voice: string,
+  outputPath: string,
+  options: { rate?: string } = {}
+): Promise<void> {
+  // RHVoice uses PowerShell which is fast, just use the regular version
+  // but wrap it to check for abort
+  if (previewAborted) throw new Error('Preview cancelled')
+  await generateSpeechWithRHVoice(text, voice, outputPath, options)
+}
+
+// Piper abortable version for preview
+async function generateSpeechWithPiperForPreview(
+  text: string,
+  modelPath: string,
+  outputPath: string,
+  options: { rate?: string; sentencePause?: number } = {}
+): Promise<void> {
+  const resourcesPath = getPiperResourcesPath()
+  const fullModelPath = path.join(resourcesPath, 'voices', modelPath)
+
+  if (!fs.existsSync(fullModelPath)) {
+    throw new Error(`Piper voice model not found: ${fullModelPath}`)
+  }
+
+  const piperExe = getPiperExecutable()
+  const piperDir = path.dirname(piperExe)
+
+  let lengthScale = 1.0
+  if (options.rate) {
+    const match = options.rate.match(/^([+-])(\d+)%$/)
+    if (match) {
+      const sign = match[1]
+      const percent = parseInt(match[2])
+      if (sign === '+') {
+        lengthScale = 1.0 / (1.0 + percent / 100)
+      } else {
+        lengthScale = 1.0 / (1.0 - percent / 100)
+      }
+    }
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const args = [
+      '--model', fullModelPath,
+      '--output_file', outputPath,
+      '--length_scale', lengthScale.toFixed(2)
+    ]
+
+    if (options.sentencePause !== undefined && options.sentencePause > 0) {
+      args.push('--sentence_silence', options.sentencePause.toFixed(2))
+    }
+
+    const piperProcess = spawn(piperExe, args, { cwd: piperDir })
+    currentPreviewProcess = piperProcess
+    let stderr = ''
+
+    piperProcess.stderr?.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    piperProcess.on('error', (error) => {
+      currentPreviewProcess = null
+      reject(new Error(`Failed to start Piper: ${error.message}`))
+    })
+
+    piperProcess.on('close', (code) => {
+      currentPreviewProcess = null
+      if (previewAborted) {
+        reject(new Error('Preview cancelled'))
+        return
+      }
+      if (code !== 0) {
+        reject(new Error(`Piper exited with code ${code}: ${stderr}`))
+        return
+      }
+      if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+        reject(new Error('Piper failed to generate audio file'))
+        return
+      }
+      resolve()
+    })
+
+    if (piperProcess.stdin) {
+      piperProcess.stdin.write(text, 'utf8')
+      piperProcess.stdin.end()
+    } else {
+      reject(new Error('Failed to write to Piper stdin'))
+    }
+  })
+}
+
+// Silero abortable version for preview
+async function generateSpeechWithSileroForPreview(
+  text: string,
+  speakerPath: string,
+  outputPath: string,
+  options: { rate?: string } = {}
+): Promise<void> {
+  // Try to use TTS server first (abortable via HTTP)
+  const serverStatus = await getTTSServerStatus()
+  if (serverStatus.running) {
+    const language = speakerPath.includes('_ru') ? 'ru' : 'en'
+    await generateViaServerForPreview('silero', text, speakerPath, language, outputPath, options.rate)
+    return
+  }
+
+  // Fallback to spawning process
+  const pythonExe = getSileroPythonExecutable()
+  const sileroScript = getSileroScript()
+
+  if (!fs.existsSync(pythonExe)) {
+    throw new Error('Silero Python environment not found. Please run setup script.')
+  }
+
+  if (!fs.existsSync(sileroScript)) {
+    throw new Error('Silero generation script not found.')
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const args = [
+      sileroScript,
+      '--text', text,
+      '--speaker', speakerPath,
+      '--output', outputPath
+    ]
+
+    if (options.rate) {
+      args.push('--rate', options.rate)
+    }
+
+    const sileroProcess = spawn(pythonExe, args)
+    currentPreviewProcess = sileroProcess
+    let stderr = ''
+
+    sileroProcess.stdout?.on('data', () => {})
+    sileroProcess.stderr?.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    sileroProcess.on('error', (error) => {
+      currentPreviewProcess = null
+      reject(new Error(`Failed to start Silero: ${error.message}`))
+    })
+
+    sileroProcess.on('close', (code) => {
+      currentPreviewProcess = null
+      if (previewAborted) {
+        reject(new Error('Preview cancelled'))
+        return
+      }
+      if (code !== 0) {
+        reject(new Error(`Silero exited with code ${code}: ${stderr}`))
+        return
+      }
+      if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+        reject(new Error('Silero failed to generate audio file'))
+        return
+      }
+      resolve()
+    })
+  })
+}
+
+// Coqui abortable version for preview
+async function generateSpeechWithCoquiForPreview(
+  text: string,
+  speakerName: string,
+  language: string,
+  outputPath: string
+): Promise<void> {
+  // Try to use TTS server first (abortable via HTTP)
+  const serverStatus = await getTTSServerStatus()
+  if (serverStatus.running) {
+    await generateViaServerForPreview('coqui', text, speakerName, language, outputPath)
+    return
+  }
+
+  // Fallback to spawning process
+  const pythonExe = getCoquiPythonExecutable()
+  const coquiScript = getCoquiScript()
+
+  if (!fs.existsSync(pythonExe)) {
+    throw new Error('Coqui Python environment not found. Please run setup.')
+  }
+
+  if (!fs.existsSync(coquiScript)) {
+    throw new Error('Coqui generation script not found.')
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const args = [
+      coquiScript,
+      '--text', text,
+      '--speaker', speakerName,
+      '--language', language,
+      '--output', outputPath
+    ]
+
+    const coquiProcess = spawn(pythonExe, args)
+    currentPreviewProcess = coquiProcess
+    let stderr = ''
+
+    coquiProcess.stdout?.on('data', () => {})
+    coquiProcess.stderr?.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    coquiProcess.on('error', (error) => {
+      currentPreviewProcess = null
+      reject(new Error(`Failed to start Coqui: ${error.message}`))
+    })
+
+    coquiProcess.on('close', (code) => {
+      currentPreviewProcess = null
+      if (previewAborted) {
+        reject(new Error('Preview cancelled'))
+        return
+      }
+      if (code !== 0) {
+        reject(new Error(`Coqui exited with code ${code}: ${stderr}`))
+        return
+      }
+      if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+        reject(new Error('Coqui failed to generate audio file'))
+        return
+      }
+      resolve()
+    })
+  })
+}
+
 // ============= ElevenLabs Implementation =============
 async function generateSpeechWithElevenLabs(
   text: string,
@@ -1283,7 +1626,9 @@ export async function convertToSpeech(
   const retryDelay = 1000
 
   // Concurrency limits depend on provider
-  const concurrentLimit = voiceInfo.provider === 'silero' ? 5 :
+  // Coqui XTTS is slow and memory-intensive, process sequentially
+  const concurrentLimit = voiceInfo.provider === 'coqui' ? 1 :
+                         voiceInfo.provider === 'silero' ? 5 :
                          voiceInfo.provider === 'piper' ? 10 :
                          voiceInfo.provider === 'elevenlabs' ? 3 : 30
 
@@ -1455,12 +1800,18 @@ export async function convertToSpeech(
 
 /**
  * Preview a voice by generating a short audio sample and returning its path
+ * Supports abortion via abortPreview()
  */
 export async function previewVoice(
   text: string,
   voiceShortName: string,
   options: { rate?: string; sentencePause?: number } = {}
 ): Promise<{ success: boolean; audioData?: string; error?: string }> {
+  // Reset abort state
+  previewAborted = false
+  currentPreviewProcess = null
+  currentPreviewRequest = null
+
   // Find voice by short name across all providers
   const allVoices = [
     ...Object.values(RHVOICE_VOICES).flat(),
@@ -1489,24 +1840,24 @@ export async function previewVoice(
   console.log('Preview paths:', { tempDir, tempWavFile, tempMp3File, voice: voiceShortName })
 
   try {
-    // Generate audio based on provider
+    // Generate audio based on provider (using abortable versions)
     switch (voiceInfo.provider) {
       case 'rhvoice':
-        await generateSpeechWithRHVoice(text, voiceInfo.shortName, tempWavFile, options)
+        await generateSpeechWithRHVoiceForPreview(text, voiceInfo.shortName, tempWavFile, options)
         break
 
       case 'piper':
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Model path required for Piper' }
         }
-        await generateSpeechWithPiper(text, voiceInfo.modelPath, tempWavFile, options)
+        await generateSpeechWithPiperForPreview(text, voiceInfo.modelPath, tempWavFile, options)
         break
 
       case 'silero':
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Speaker path required for Silero' }
         }
-        await generateSpeechWithSilero(text, voiceInfo.modelPath, tempWavFile, options)
+        await generateSpeechWithSileroForPreview(text, voiceInfo.modelPath, tempWavFile, options)
         break
 
       case 'elevenlabs':
@@ -1520,11 +1871,16 @@ export async function previewVoice(
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Speaker name required for Coqui' }
         }
-        await generateSpeechWithCoqui(text, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
+        await generateSpeechWithCoquiForPreview(text, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
         break
 
       default:
         return { success: false, error: `Unknown provider: ${voiceInfo.provider}` }
+    }
+
+    // Check if aborted
+    if (previewAborted) {
+      return { success: false, error: 'Preview cancelled' }
     }
 
     console.log('WAV exists:', fs.existsSync(tempWavFile), 'Size:', fs.existsSync(tempWavFile) ? fs.statSync(tempWavFile).size : 0)
@@ -1535,6 +1891,11 @@ export async function previewVoice(
 
     // Convert WAV to MP3 for browser playback
     await convertWavToMp3(tempWavFile, tempMp3File)
+
+    // Check if aborted
+    if (previewAborted) {
+      return { success: false, error: 'Preview cancelled' }
+    }
 
     console.log('MP3 exists:', fs.existsSync(tempMp3File), 'Size:', fs.existsSync(tempMp3File) ? fs.statSync(tempMp3File).size : 0)
 
@@ -1572,6 +1933,11 @@ export async function previewVoice(
       if (fs.existsSync(tempMp3File)) fs.unlinkSync(tempMp3File)
     } catch {
       // Ignore cleanup errors
+    }
+
+    // Don't show error if it was aborted
+    if (previewAborted) {
+      return { success: false, error: 'Preview cancelled' }
     }
     return { success: false, error: (error as Error).message }
   }

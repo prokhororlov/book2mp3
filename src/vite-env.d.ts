@@ -81,6 +81,7 @@ interface ElectronAPI {
   abortConversion: () => Promise<{ success: boolean }>
   getFileInfo: (filePath: string) => Promise<{ success: boolean; info?: FileInfo; error?: string }>
   previewVoice: (text: string, voiceShortName: string) => Promise<{ success: boolean; audioData?: string; error?: string }>
+  abortPreview: () => Promise<{ success: boolean }>
   onConversionProgress: (callback: (data: ConversionProgress) => void) => () => void
 
   // Setup/dependency management

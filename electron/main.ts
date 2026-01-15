@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
-import { convertToSpeech, getVoicesForLanguage, previewVoice, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
+import { convertToSpeech, getVoicesForLanguage, previewVoice, abortPreview, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
 import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools } from './services/setup'
 
 // Load environment variables from .env file
@@ -11,7 +11,8 @@ config()
 
 let mainWindow: BrowserWindow | null = null
 
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+// Lazy getter for isDev to avoid accessing app.isPackaged before Electron is ready
+const getIsDev = () => process.env.NODE_ENV === 'development' || !app.isPackaged
 
 function createWindow() {
   Menu.setApplicationMenu(null)
@@ -30,7 +31,7 @@ function createWindow() {
     show: false,
   })
 
-  if (isDev) {
+  if (getIsDev()) {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
   } else {
@@ -231,6 +232,11 @@ ipcMain.handle('get-file-info', async (_event, filePath: string) => {
 
 ipcMain.handle('preview-voice', async (_event, text: string, voiceShortName: string, options: Record<string, unknown> = {}) => {
   return await previewVoice(text, voiceShortName, options as { rate?: string; sentencePause?: number })
+})
+
+ipcMain.handle('abort-preview', () => {
+  abortPreview()
+  return { success: true }
 })
 
 // Setup/dependency management handlers
@@ -465,3 +471,4 @@ ipcMain.handle('tts-model-load', async (_event, engine: 'silero' | 'coqui', lang
 ipcMain.handle('tts-model-unload', async (_event, engine: 'silero' | 'coqui' | 'all', language?: string) => {
   return unloadTTSModel(engine, language)
 })
+

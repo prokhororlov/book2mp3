@@ -97,11 +97,13 @@ def main():
 
         print(f"Generating audio for text length: {len(args.text)} characters", file=sys.stderr)
 
-        # Generate audio
+        # Generate audio with auto-stress and yo placement for Russian
         audio = model.apply_tts(
             text=args.text,
             speaker=speaker,
-            sample_rate=args.sample_rate
+            sample_rate=args.sample_rate,
+            put_accent=True,
+            put_yo=True
         )
 
         # Save to WAV file

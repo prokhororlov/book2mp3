@@ -31,3 +31,4 @@ npm-debug.log*
 *.swo
 .vscode/
 
+.mcp.json

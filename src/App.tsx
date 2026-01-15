@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '@/components/ui/select'
@@ -6,12 +6,12 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings, ChevronRight, Info, CheckCircle, MonitorSpeaker, Circle, Square } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
-// Gender icons as inline SVG components
+// Gender icons as inline SVG components with subtle, theme-appropriate colors
 const MaleIcon = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg className={`${className} text-sky-600/70 dark:text-sky-400/60`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="10" cy="14" r="5" />
     <path d="M19 5l-5.4 5.4" />
     <path d="M15 5h4v4" />
@@ -19,7 +19,7 @@ const MaleIcon = ({ className }: { className?: string }) => (
 )
 
 const FemaleIcon = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg className={`${className} text-rose-400/70 dark:text-rose-300/60`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="8" r="5" />
     <path d="M12 13v8" />
     <path d="M9 18h6" />
@@ -83,11 +83,26 @@ const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   elevenlabs: <Cloud className="h-4 w-4" />,
 }
 
+function detectLanguage(text: string): 'en' | 'ru-RU' {
+  const sample = text.slice(0, 1000)
+  let cyrillicCount = 0
+  let latinCount = 0
+
+  for (const char of sample) {
+    if (/[а-яА-ЯёЁ]/.test(char)) {
+      cyrillicCount++
+    } else if (/[a-zA-Z]/.test(char)) {
+      latinCount++
+    }
+  }
+
+  return cyrillicCount > latinCount ? 'ru-RU' : 'en'
+}
+
 function App() {
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [file, setFile] = useState<FileInfo | null>(null)
   const [bookContent, setBookContent] = useState<BookContent | null>(null)
-  // Default to English
   const [language, setLanguage] = useState('en')
 
   // Check if setup is needed on app start
@@ -140,6 +155,7 @@ function App() {
   const [tempPreviewText, setTempPreviewText] = useState('')
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null)
+  const previewAbortedRef = useRef(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
     const stored = localStorage.getItem('theme')
     return (stored === 'dark' || stored === 'light' || stored === 'system') ? stored : 'system'
@@ -412,6 +428,10 @@ function App() {
     }
 
     setBookContent(parseResult.content)
+
+    // Auto-detect language from book content
+    const detectedLang = detectLanguage(parseResult.content.fullText)
+    setLanguage(detectedLang)
   }
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -506,6 +526,8 @@ function App() {
       setPreviewAudio(null)
     }
 
+    // Reset abort flag
+    previewAbortedRef.current = false
     setIsPreviewing(true)
     setError(null)
 
@@ -521,6 +543,11 @@ function App() {
       }
 
       const result = await window.electronAPI.previewVoice(previewText, selectedVoice, options)
+
+      // Ignore result if preview was aborted while waiting
+      if (previewAbortedRef.current) {
+        return
+      }
 
       if (result.success && result.audioData) {
         const audio = new Audio(result.audioData)
@@ -551,12 +578,36 @@ function App() {
         setIsPreviewing(false)
       }
     } catch (err) {
+      // Ignore errors if preview was aborted
+      if (previewAbortedRef.current) {
+        return
+      }
       setIsPreviewing(false)
       // Don't show error if it's just an abort
       if ((err as Error).name !== 'AbortError') {
         setError((err as Error).message)
       }
     }
+  }
+
+  const stopPreviewVoice = async () => {
+    // Set abort flag to ignore any pending results
+    previewAbortedRef.current = true
+
+    // Abort backend generation
+    if (window.electronAPI) {
+      await window.electronAPI.abortPreview()
+    }
+
+    // Stop and cleanup any currently playing audio
+    if (previewAudio) {
+      previewAudio.pause()
+      previewAudio.onended = null
+      previewAudio.onerror = null
+      previewAudio.src = ''
+      setPreviewAudio(null)
+    }
+    setIsPreviewing(false)
   }
 
   const startEditingPreview = () => {
@@ -606,11 +657,23 @@ function App() {
 
   const handleUnloadModel = async (engine: 'silero' | 'coqui' | 'all', language?: string) => {
     if (!window.electronAPI) return
+    const loadKey = language ? `${engine}-${language}` : engine
+    setIsLoadingModel(loadKey)
     try {
       await window.electronAPI.ttsModelUnload(engine, language)
-      await refreshServerStatus()
+      const status = await window.electronAPI.ttsServerStatus()
+      setTtsServerStatus(status)
+
+      // Stop server if no models are loaded
+      const hasLoadedModels = status.silero.ru_loaded || status.silero.en_loaded || status.coqui.loaded
+      if (status.running && !hasLoadedModels) {
+        await window.electronAPI.ttsServerStop()
+        await refreshServerStatus()
+      }
     } catch (err) {
       setError((err as Error).message)
+    } finally {
+      setIsLoadingModel(null)
     }
   }
 
@@ -969,7 +1032,7 @@ function App() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="text-sm text-muted-foreground space-y-1">
+                      <div className="text-sm text-muted-foreground space-y-2">
                         <p>For Silero to work, the following will be installed:</p>
                         <ul className="list-disc list-inside text-xs space-y-0.5 ml-1">
                           <li>Python virtual environment</li>
@@ -988,7 +1051,9 @@ function App() {
                         </ul>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-xs text-muted-foreground">Initial download: ~155 MB</span>
+                        <span className="text-xs text-muted-foreground">
+                          Initial download: ~155 MB
+                        </span>
                         <Button
                           variant="default"
                           size="sm"
@@ -1158,146 +1223,133 @@ function App() {
               {((selectedProvider === 'silero' && sileroInstalled) ||
                 (selectedProvider === 'coqui' && coquiInstalled)) && (
                 <div className="space-y-3 p-3 border rounded-md bg-gradient-to-b from-muted/40 to-muted/20">
-                  {/* Header with explanation */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Cpu className="h-3.5 w-3.5" />
-                    <span>Load models into RAM for fast generation</span>
+                    <span>Load models for fast generation</span>
                   </div>
 
-                  {/* Silero Models */}
+                  {/* Silero Models - Unified Card */}
                   {selectedProvider === 'silero' && (
-                    <div className="space-y-2">
-                      {/* Russian Model Card */}
-                      <div className={`p-2.5 rounded-lg border ${ttsServerStatus?.silero.ru_loaded ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-background/50'}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2.5 h-2.5 rounded-full ${ttsServerStatus?.silero.ru_loaded ? 'bg-green-500 shadow-sm shadow-green-500/50' : 'bg-muted-foreground/30'}`} />
-                            <div>
-                              <div className="font-medium text-sm">Silero v5_ru</div>
-                              <div className="text-xs text-muted-foreground">Russian</div>
-                            </div>
-                          </div>
-                          <Button
-                            variant={ttsServerStatus?.silero.ru_loaded ? "outline" : "default"}
-                            size="sm"
-                            className="h-8 text-xs px-3"
-                            disabled={isLoadingModel !== null}
-                            onClick={() => ttsServerStatus?.silero.ru_loaded
-                              ? handleUnloadModel('silero', 'ru')
-                              : handleLoadModel('silero', 'ru')
-                            }
-                          >
-                            {isLoadingModel === 'silero-ru' ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                                Loading...
-                              </>
-                            ) : ttsServerStatus?.silero.ru_loaded ? (
-                              <>
-                                <X className="h-3.5 w-3.5 mr-1.5" />
-                                Eject
-                              </>
-                            ) : (
-                              <>
-                                <Cpu className="h-3.5 w-3.5 mr-1.5" />
-                                Load to RAM
-                              </>
-                            )}
-                          </Button>
+                    <div className="p-3 rounded-lg border bg-background/50">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium text-sm">Silero TTS</div>
+                          <span className="text-xs text-muted-foreground">Neural voices</span>
                         </div>
                       </div>
 
-                      {/* English Model Card */}
-                      <div className={`p-2.5 rounded-lg border ${ttsServerStatus?.silero.en_loaded ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-background/50'}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2.5 h-2.5 rounded-full ${ttsServerStatus?.silero.en_loaded ? 'bg-green-500 shadow-sm shadow-green-500/50' : 'bg-muted-foreground/30'}`} />
-                            <div>
-                              <div className="font-medium text-sm">Silero v3_en</div>
-                              <div className="text-xs text-muted-foreground">English</div>
-                            </div>
-                          </div>
-                          <Button
-                            variant={ttsServerStatus?.silero.en_loaded ? "outline" : "default"}
-                            size="sm"
-                            className="h-8 text-xs px-3"
-                            disabled={isLoadingModel !== null}
-                            onClick={() => ttsServerStatus?.silero.en_loaded
-                              ? handleUnloadModel('silero', 'en')
-                              : handleLoadModel('silero', 'en')
-                            }
-                          >
-                            {isLoadingModel === 'silero-en' ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                                Loading...
-                              </>
-                            ) : ttsServerStatus?.silero.en_loaded ? (
-                              <>
-                                <X className="h-3.5 w-3.5 mr-1.5" />
-                                Eject
-                              </>
-                            ) : (
-                              <>
-                                <Cpu className="h-3.5 w-3.5 mr-1.5" />
-                                Load to RAM
-                              </>
-                            )}
-                          </Button>
-                        </div>
+                      {/* Language chips */}
+                      <div className="flex flex-wrap gap-2">
+                        {/* Russian */}
+                        <button
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
+                            ttsServerStatus?.silero.ru_loaded
+                              ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                              : 'bg-muted/50 border-border hover:bg-muted'
+                          }`}
+                          onClick={() => ttsServerStatus?.silero.ru_loaded
+                            ? handleUnloadModel('silero', 'ru')
+                            : handleLoadModel('silero', 'ru')
+                          }
+                          disabled={isLoadingModel !== null}
+                        >
+                          {isLoadingModel === 'silero-ru' ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : ttsServerStatus?.silero.ru_loaded ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Circle className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span>Russian (v5)</span>
+                        </button>
+
+                        {/* English */}
+                        <button
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
+                            ttsServerStatus?.silero.en_loaded
+                              ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                              : 'bg-muted/50 border-border hover:bg-muted'
+                          }`}
+                          onClick={() => ttsServerStatus?.silero.en_loaded
+                            ? handleUnloadModel('silero', 'en')
+                            : handleLoadModel('silero', 'en')
+                          }
+                          disabled={isLoadingModel !== null}
+                        >
+                          {isLoadingModel === 'silero-en' ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : ttsServerStatus?.silero.en_loaded ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Circle className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span>English (v3)</span>
+                        </button>
+                      </div>
+
+                      {/* Status line */}
+                      <div className="mt-3 text-xs text-muted-foreground">
+                        {ttsServerStatus?.silero.ru_loaded && ttsServerStatus?.silero.en_loaded
+                          ? 'Both models loaded'
+                          : ttsServerStatus?.silero.ru_loaded
+                            ? 'Russian model loaded'
+                            : ttsServerStatus?.silero.en_loaded
+                              ? 'English model loaded'
+                              : 'Click a language to load its model'}
                       </div>
                     </div>
                   )}
 
                   {/* Coqui Model */}
                   {selectedProvider === 'coqui' && (
-                    <div className={`p-2.5 rounded-lg border ${ttsServerStatus?.coqui.loaded ? 'border-green-500/30 bg-green-500/5' : 'border-border bg-background/50'}`}>
-                      <div className="flex items-center justify-between">
+                    <div className="p-3 rounded-lg border bg-background/50">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full ${ttsServerStatus?.coqui.loaded ? 'bg-green-500 shadow-sm shadow-green-500/50' : 'bg-muted-foreground/30'}`} />
-                          <div>
-                            <div className="font-medium text-sm">Coqui XTTS-v2</div>
-                            <div className="text-xs text-muted-foreground">Multilingual</div>
-                          </div>
+                          <div className="font-medium text-sm">Coqui XTTS-v2</div>
+                          <span className="text-xs text-muted-foreground">Multilingual neural voices</span>
                         </div>
-                        <Button
-                          variant={ttsServerStatus?.coqui.loaded ? "outline" : "default"}
-                          size="sm"
-                          className="h-8 text-xs px-3"
-                          disabled={isLoadingModel !== null}
+                      </div>
+
+                      {/* Model chip */}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
+                            ttsServerStatus?.coqui.loaded
+                              ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                              : 'bg-muted/50 border-border hover:bg-muted'
+                          }`}
                           onClick={() => ttsServerStatus?.coqui.loaded
                             ? handleUnloadModel('coqui')
                             : handleLoadModel('coqui')
                           }
+                          disabled={isLoadingModel !== null}
                         >
                           {isLoadingModel === 'coqui' ? (
-                            <>
-                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                              Loading...
-                            </>
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           ) : ttsServerStatus?.coqui.loaded ? (
-                            <>
-                              <X className="h-3.5 w-3.5 mr-1.5" />
-                              Eject
-                            </>
+                            <CheckCircle className="h-4 w-4 text-green-500" />
                           ) : (
-                            <>
-                              <Cpu className="h-3.5 w-3.5 mr-1.5" />
-                              Load to RAM
-                            </>
+                            <Circle className="h-4 w-4 text-muted-foreground" />
                           )}
-                        </Button>
+                          <span>XTTS v2</span>
+                        </button>
+                      </div>
+
+                      {/* Status line */}
+                      <div className="mt-3 text-xs text-muted-foreground">
+                        {ttsServerStatus?.coqui.loaded
+                          ? 'Model loaded and ready'
+                          : 'Click to load the model'}
                       </div>
                     </div>
                   )}
 
-                  {/* Current Usage Status Bar */}
+                  {/* Compact status bar */}
                   {ttsServerStatus?.running && (
-                    <div className="text-xs text-muted-foreground pt-2 border-t">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground/70">Current usage:</span>
-                        <span className="font-mono">RAM: {ttsServerStatus.memory_gb.toFixed(2)} GB</span>
-                      </div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
+                      <span className="font-mono">RAM: {ttsServerStatus.memory_gb.toFixed(2)} GB</span>
                     </div>
                   )}
 
@@ -1770,15 +1822,15 @@ function App() {
                       </SelectContent>
                     </Select>
                     <Button
-                      variant="outline"
+                      variant={isPreviewing ? "default" : "outline"}
                       size="icon"
                       className="h-9 w-9"
-                      onClick={handlePreviewVoice}
-                      disabled={!isProviderReady || !isModelLoadedForLanguage || !isSelectedVoiceValid || isConverting || isPreviewing || installingVoice !== null || installingRHVoice !== null}
-                      title={!isModelLoadedForLanguage ? "Load model first" : "Preview voice"}
+                      onClick={isPreviewing ? stopPreviewVoice : handlePreviewVoice}
+                      disabled={!isProviderReady || !isModelLoadedForLanguage || !isSelectedVoiceValid || isConverting || installingVoice !== null || installingRHVoice !== null}
+                      title={isPreviewing ? "Stop preview" : (!isModelLoadedForLanguage ? "Load model first" : "Preview voice")}
                     >
                       {isPreviewing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Square className="h-4 w-4" />
                       ) : (
                         <Play className="h-4 w-4" />
                       )}
@@ -2005,6 +2057,7 @@ function App() {
           </Card>
         )}
       </div>
+
     </div>
   )
 }

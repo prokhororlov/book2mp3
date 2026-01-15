@@ -69,6 +69,7 @@ export interface RHVoiceUrls {
   }
 }
 
+
 const electronAPI = {
   openFileDialog: (): Promise<string | null> =>
     ipcRenderer.invoke('open-file-dialog'),
@@ -101,6 +102,9 @@ const electronAPI = {
 
   previewVoice: (text: string, voiceShortName: string, options?: Record<string, unknown>): Promise<{ success: boolean; audioData?: string; error?: string }> =>
     ipcRenderer.invoke('preview-voice', text, voiceShortName, options || {}),
+
+  abortPreview: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('abort-preview'),
 
   onConversionProgress: (callback: (data: ConversionProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: ConversionProgress) => callback(data)
