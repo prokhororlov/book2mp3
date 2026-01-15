@@ -1,6 +1,6 @@
 {
   "name": "book-to-mp3",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Convert books (FB2, EPUB, TXT) to MP3 using text-to-speech",
   "main": "dist-electron/main.js",
   "scripts": {
