@@ -42,12 +42,66 @@ def parse_rate(rate_str):
     return 1.0
 
 
-def change_speed(audio, speed_factor):
-    """Change audio speed by resampling."""
-    if speed_factor == 1.0:
+def ssml_rate_to_keyword(rate_value):
+    """Convert numeric rate (0.5-2.0) to SSML keyword."""
+    if rate_value <= 0.6:
+        return 'x-slow'
+    elif rate_value <= 0.8:
+        return 'slow'
+    elif rate_value <= 1.2:
+        return 'medium'
+    elif rate_value <= 1.5:
+        return 'fast'
+    else:
+        return 'x-fast'
+
+
+def ssml_pitch_to_keyword(pitch_value):
+    """Convert numeric pitch (0.5-2.0) to SSML keyword."""
+    if pitch_value <= 0.6:
+        return 'x-low'
+    elif pitch_value <= 0.8:
+        return 'low'
+    elif pitch_value <= 1.2:
+        return 'medium'
+    elif pitch_value <= 1.5:
+        return 'high'
+    else:
+        return 'x-high'
+
+
+def wrap_with_ssml(text, rate=None, pitch=None):
+    """Wrap text with SSML prosody tags if rate or pitch specified."""
+    rate_kw = ssml_rate_to_keyword(rate) if rate else None
+    pitch_kw = ssml_pitch_to_keyword(pitch) if pitch else None
+
+    # Only wrap if non-default values
+    needs_wrap = (rate_kw and rate_kw != 'medium') or (pitch_kw and pitch_kw != 'medium')
+
+    if not needs_wrap:
+        return text, False
+
+    prosody_attrs = []
+    if rate_kw and rate_kw != 'medium':
+        prosody_attrs.append(f'rate="{rate_kw}"')
+    if pitch_kw and pitch_kw != 'medium':
+        prosody_attrs.append(f'pitch="{pitch_kw}"')
+
+    attrs_str = ' '.join(prosody_attrs)
+    ssml_text = f'<speak><prosody {attrs_str}>{text}</prosody></speak>'
+    return ssml_text, True
+
+
+def time_stretch(audio, factor):
+    """
+    Time stretch audio by resampling.
+    Factor > 1.0 = faster (shorter duration)
+    Factor < 1.0 = slower (longer duration)
+    Note: This also affects pitch (higher factor = higher pitch).
+    """
+    if factor == 1.0:
         return audio
-    # Resample to change speed (higher speed = shorter audio)
-    new_length = int(len(audio) / speed_factor)
+    new_length = int(len(audio) / factor)
     return signal.resample(audio, new_length)
 
 
@@ -57,7 +111,9 @@ def main():
     parser.add_argument('--speaker', required=True, help='Speaker model (e.g., v3_1_ru/aidar)')
     parser.add_argument('--output', required=True, help='Output WAV file path')
     parser.add_argument('--sample-rate', type=int, default=48000, help='Sample rate (default: 48000)')
-    parser.add_argument('--rate', type=str, default='', help='Speed adjustment (e.g., +50%, -25%)')
+    parser.add_argument('--rate', type=str, default='', help='Speed adjustment via SSML (e.g., +50%%, -25%%, or numeric like 1.5)')
+    parser.add_argument('--pitch', type=float, default=1.0, help='Pitch adjustment via SSML (0.5-2.0, default: 1.0)')
+    parser.add_argument('--time-stretch', type=float, default=1.0, help='Post-processing time stretch via resampling (affects both speed and pitch, 0.5-2.0, default: 1.0)')
 
     args = parser.parse_args()
 
@@ -97,14 +153,28 @@ def main():
 
         print(f"Generating audio for text length: {len(args.text)} characters", file=sys.stderr)
 
-        # Generate audio with auto-stress and yo placement for Russian
-        audio = model.apply_tts(
-            text=args.text,
-            speaker=speaker,
-            sample_rate=args.sample_rate,
-            put_accent=True,
-            put_yo=True
-        )
+        # Parse rate value
+        rate_value = parse_rate(args.rate) if args.rate else 1.0
+        pitch_value = args.pitch
+
+        # Wrap text with SSML if non-default rate or pitch
+        ssml_text, use_ssml = wrap_with_ssml(args.text, rate_value, pitch_value)
+
+        if use_ssml:
+            print(f"Using SSML with rate={ssml_rate_to_keyword(rate_value)}, pitch={ssml_pitch_to_keyword(pitch_value)}", file=sys.stderr)
+            audio = model.apply_tts(
+                ssml_text=ssml_text,
+                speaker=speaker,
+                sample_rate=args.sample_rate
+            )
+        else:
+            audio = model.apply_tts(
+                text=args.text,
+                speaker=speaker,
+                sample_rate=args.sample_rate,
+                put_accent=True,
+                put_yo=True
+            )
 
         # Save to WAV file
         output_path = Path(args.output)
@@ -118,11 +188,10 @@ def main():
         if audio.ndim > 1:
             audio = audio.squeeze()
 
-        # Apply speed change if specified
-        speed_factor = parse_rate(args.rate)
-        if speed_factor != 1.0:
-            print(f"Applying speed factor: {speed_factor}", file=sys.stderr)
-            audio = change_speed(audio, speed_factor)
+        # Apply time stretch if specified (post-processing resampling)
+        if args.time_stretch != 1.0:
+            print(f"Applying time stretch: {args.time_stretch}x", file=sys.stderr)
+            audio = time_stretch(audio, args.time_stretch)
 
         # Normalize to int16 range
         audio = (audio * 32767).astype(np.int16)

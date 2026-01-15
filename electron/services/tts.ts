@@ -350,17 +350,23 @@ async function generateViaServer(
   speaker: string,
   language: string,
   outputPath: string,
-  rate?: string | number
+  rate?: string | number,
+  pitch?: number,
+  timeStretch?: number
 ): Promise<void> {
   const body = JSON.stringify({
     engine,
     text,
     speaker,
     language,
-    rate
+    rate,
+    pitch,
+    time_stretch: timeStretch
   })
 
-  const audioBuffer = await httpRequestBinary(`${TTS_SERVER_URL}/generate`, 'POST', body)
+  // Coqui XTTS is much slower, use 3x timeout (6 minutes instead of 2)
+  const timeout = engine === 'coqui' ? 360000 : 120000
+  const audioBuffer = await httpRequestBinary(`${TTS_SERVER_URL}/generate`, 'POST', body, timeout)
 
   // Ensure output directory exists
   const outputDir = path.dirname(outputPath)
@@ -378,14 +384,18 @@ async function generateViaServerForPreview(
   speaker: string,
   language: string,
   outputPath: string,
-  rate?: string | number
+  rate?: string | number,
+  pitch?: number,
+  timeStretch?: number
 ): Promise<void> {
   const body = JSON.stringify({
     engine,
     text,
     speaker,
     language,
-    rate
+    rate,
+    pitch,
+    time_stretch: timeStretch
   })
 
   const audioBuffer = await httpRequestBinaryForPreview(`${TTS_SERVER_URL}/generate`, 'POST', body)
@@ -438,7 +448,7 @@ function httpRequest(url: string, method: string, body?: string): Promise<string
   })
 }
 
-function httpRequestBinary(url: string, method: string, body?: string): Promise<Buffer> {
+function httpRequestBinary(url: string, method: string, body?: string, timeout: number = 120000): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url)
     const options = {
@@ -466,7 +476,7 @@ function httpRequestBinary(url: string, method: string, body?: string): Promise<
     })
 
     req.on('error', reject)
-    req.setTimeout(120000, () => {
+    req.setTimeout(timeout, () => {
       req.destroy()
       reject(new Error('Request timeout'))
     })
@@ -595,16 +605,105 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
     }
   ],
   'en': [
+    // en_US voices
     {
-      name: 'Amy',
+      name: 'Amy (US)',
       shortName: 'piper-amy',
       gender: 'Female',
       locale: 'en',
       provider: 'piper',
-      modelPath: 'en_US/amy/low/en_US-amy-low.onnx'
+      modelPath: 'en_US/amy/medium/en_US-amy-medium.onnx'
     },
     {
-      name: 'Lessac',
+      name: 'Arctic (US)',
+      shortName: 'piper-arctic',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/arctic/medium/en_US-arctic-medium.onnx'
+    },
+    {
+      name: 'Bryce (US)',
+      shortName: 'piper-bryce',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/bryce/medium/en_US-bryce-medium.onnx'
+    },
+    {
+      name: 'Danny (US)',
+      shortName: 'piper-danny',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/danny/low/en_US-danny-low.onnx'
+    },
+    {
+      name: 'HFC Female (US)',
+      shortName: 'piper-hfc-female',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/hfc_female/medium/en_US-hfc_female-medium.onnx'
+    },
+    {
+      name: 'HFC Male (US)',
+      shortName: 'piper-hfc-male',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/hfc_male/medium/en_US-hfc_male-medium.onnx'
+    },
+    {
+      name: 'Joe (US)',
+      shortName: 'piper-joe',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/joe/medium/en_US-joe-medium.onnx'
+    },
+    {
+      name: 'John (US)',
+      shortName: 'piper-john',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/john/medium/en_US-john-medium.onnx'
+    },
+    {
+      name: 'Kathleen (US)',
+      shortName: 'piper-kathleen',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/kathleen/low/en_US-kathleen-low.onnx'
+    },
+    {
+      name: 'Kristin (US)',
+      shortName: 'piper-kristin',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/kristin/medium/en_US-kristin-medium.onnx'
+    },
+    {
+      name: 'Kusal (US)',
+      shortName: 'piper-kusal',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/kusal/medium/en_US-kusal-medium.onnx'
+    },
+    {
+      name: 'L2Arctic (US)',
+      shortName: 'piper-l2arctic',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/l2arctic/medium/en_US-l2arctic-medium.onnx'
+    },
+    {
+      name: 'Lessac (US)',
       shortName: 'piper-lessac',
       gender: 'Male',
       locale: 'en',
@@ -612,12 +711,133 @@ const PIPER_VOICES: Record<string, VoiceInfo[]> = {
       modelPath: 'en_US/lessac/medium/en_US-lessac-medium.onnx'
     },
     {
-      name: 'Ryan',
+      name: 'LibriTTS (US)',
+      shortName: 'piper-libritts',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/libritts/high/en_US-libritts-high.onnx'
+    },
+    {
+      name: 'LibriTTS-R (US)',
+      shortName: 'piper-libritts-r',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/libritts_r/medium/en_US-libritts_r-medium.onnx'
+    },
+    {
+      name: 'LJSpeech (US)',
+      shortName: 'piper-ljspeech',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/ljspeech/medium/en_US-ljspeech-medium.onnx'
+    },
+    {
+      name: 'Norman (US)',
+      shortName: 'piper-norman',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/norman/medium/en_US-norman-medium.onnx'
+    },
+    {
+      name: 'Reza Ibrahim (US)',
+      shortName: 'piper-reza-ibrahim',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/reza_ibrahim/medium/en_US-reza_ibrahim-medium.onnx'
+    },
+    {
+      name: 'Ryan (US)',
       shortName: 'piper-ryan',
       gender: 'Male',
       locale: 'en',
       provider: 'piper',
       modelPath: 'en_US/ryan/medium/en_US-ryan-medium.onnx'
+    },
+    {
+      name: 'Sam (US)',
+      shortName: 'piper-sam',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_US/sam/medium/en_US-sam-medium.onnx'
+    },
+    // en_GB voices
+    {
+      name: 'Alan (GB)',
+      shortName: 'piper-alan',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/alan/medium/en_GB-alan-medium.onnx'
+    },
+    {
+      name: 'Alba (GB)',
+      shortName: 'piper-alba',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/alba/medium/en_GB-alba-medium.onnx'
+    },
+    {
+      name: 'Aru (GB)',
+      shortName: 'piper-aru',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/aru/medium/en_GB-aru-medium.onnx'
+    },
+    {
+      name: 'Cori (GB)',
+      shortName: 'piper-cori',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/cori/medium/en_GB-cori-medium.onnx'
+    },
+    {
+      name: 'Jenny Dioco (GB)',
+      shortName: 'piper-jenny-dioco',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx'
+    },
+    {
+      name: 'Northern English Male (GB)',
+      shortName: 'piper-northern-english-male',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx'
+    },
+    {
+      name: 'Semaine (GB)',
+      shortName: 'piper-semaine',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/semaine/medium/en_GB-semaine-medium.onnx'
+    },
+    {
+      name: 'Southern English Female (GB)',
+      shortName: 'piper-southern-english-female',
+      gender: 'Female',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/southern_english_female/low/en_GB-southern_english_female-low.onnx'
+    },
+    {
+      name: 'VCTK (GB)',
+      shortName: 'piper-vctk',
+      gender: 'Male',
+      locale: 'en',
+      provider: 'piper',
+      modelPath: 'en_GB/vctk/medium/en_GB-vctk-medium.onnx'
     }
   ]
 }
@@ -860,6 +1080,341 @@ function getCoquiScript(): string {
 }
 
 // Clean text for TTS
+
+// Number to words conversion rules
+// Based on Benedict Lee's dictionary (Sep 2022)
+
+interface NumberRule {
+  pattern: RegExp
+  replacement: string | ((match: string, ...groups: string[]) => string)
+}
+
+// Russian number conversion rules
+const RUSSIAN_NUMBER_RULES: NumberRule[] = [
+  // Decimal zeros
+  { pattern: /[\.,]0{6}0+/g, replacement: ' много нулей' },
+  { pattern: /[\.,]000000/g, replacement: ' шесть нулей' },
+  { pattern: /[\.,]00000/g, replacement: ' пять нулей' },
+  { pattern: /[\.,]0000/g, replacement: ' четыре нуля' },
+  { pattern: /[\.,]000/g, replacement: ' три нуля' },
+  { pattern: /[\.,]00/g, replacement: ' ноль ноль' },
+  { pattern: /[\.,]0/g, replacement: ' ноль' },
+
+  // Leading zeros
+  { pattern: /\b0+(\d+)/g, replacement: '$1' },
+  // Too long numbers
+  { pattern: /\d{16,}/g, replacement: 'несказанно много' },
+
+  // Standalone zero
+  { pattern: /\b0\b/g, replacement: 'ноль' },
+]
+
+// English number conversion rules
+const ENGLISH_NUMBER_RULES: NumberRule[] = [
+  // Decimal zeros
+  { pattern: /[\.,]0{6}0+/g, replacement: ' many zero' },
+  { pattern: /[\.,]000000/g, replacement: ' six zero' },
+  { pattern: /[\.,]00000/g, replacement: ' five zero' },
+  { pattern: /[\.,]0000/g, replacement: ' four zero' },
+  { pattern: /[\.,]000/g, replacement: ' three zero' },
+  { pattern: /[\.,]00/g, replacement: ' two zero' },
+  { pattern: /[\.,]0/g, replacement: ' zero' },
+
+  // Leading zeros
+  { pattern: /\b0+(\d+)/g, replacement: '$1' },
+  // Too long numbers
+  { pattern: /\d{16,}/g, replacement: 'too much' },
+
+  // Standalone zero
+  { pattern: /\b0\b/g, replacement: 'zero' },
+]
+
+// Russian word forms for numbers
+const RUSSIAN_UNITS = ['', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять']
+const RUSSIAN_TEENS = ['десять', 'одиннадцать', 'двенадцать', 'тринадцать', 'четырнадцать', 'пятнадцать', 'шестнадцать', 'семнадцать', 'восемнадцать', 'девятнадцать']
+const RUSSIAN_TENS = ['', '', 'двадцать', 'тридцать', 'сорок', 'пятьдесят', 'шестьдесят', 'семьдесят', 'восемьдесят', 'девяносто']
+const RUSSIAN_HUNDREDS = ['', 'сто', 'двести', 'триста', 'четыреста', 'пятьсот', 'шестьсот', 'семьсот', 'восемьсот', 'девятьсот']
+
+// English word forms for numbers
+const ENGLISH_UNITS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
+const ENGLISH_TEENS = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
+const ENGLISH_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
+
+function convertHundredsRu(num: number): string {
+  if (num === 0) return ''
+
+  const parts: string[] = []
+  const h = Math.floor(num / 100)
+  const t = Math.floor((num % 100) / 10)
+  const u = num % 10
+
+  if (h > 0) parts.push(RUSSIAN_HUNDREDS[h])
+
+  if (t === 1) {
+    parts.push(RUSSIAN_TEENS[u])
+  } else {
+    if (t > 1) parts.push(RUSSIAN_TENS[t])
+    if (u > 0) parts.push(RUSSIAN_UNITS[u])
+  }
+
+  return parts.join(' ').trim()
+}
+
+function convertHundredsEn(num: number): string {
+  if (num === 0) return ''
+
+  const parts: string[] = []
+  const h = Math.floor(num / 100)
+  const t = Math.floor((num % 100) / 10)
+  const u = num % 10
+
+  if (h > 0) parts.push(ENGLISH_UNITS[h] + ' hundred')
+
+  if (t === 1) {
+    parts.push(ENGLISH_TEENS[u])
+  } else {
+    if (t > 1) {
+      if (u > 0) {
+        parts.push(ENGLISH_TENS[t] + '-' + ENGLISH_UNITS[u])
+      } else {
+        parts.push(ENGLISH_TENS[t])
+      }
+    } else if (u > 0) {
+      parts.push(ENGLISH_UNITS[u])
+    }
+  }
+
+  return parts.join(' ').trim()
+}
+
+// Russian plural forms for scale words
+function getRussianScaleWord(num: number, one: string, few: string, many: string): string {
+  const lastTwo = num % 100
+  const lastOne = num % 10
+
+  if (lastTwo >= 11 && lastTwo <= 19) return many
+  if (lastOne === 1) return one
+  if (lastOne >= 2 && lastOne <= 4) return few
+  return many
+}
+
+function numberToWordsRu(num: number): string {
+  if (num === 0) return 'ноль'
+  if (num >= 1000000000000000) return 'несказанно много'
+
+  const parts: string[] = []
+
+  // Trillions
+  const trillions = Math.floor(num / 1000000000000)
+  if (trillions > 0) {
+    parts.push(convertHundredsRu(trillions) + ' ' + getRussianScaleWord(trillions, 'триллион', 'триллиона', 'триллионов'))
+    num %= 1000000000000
+  }
+
+  // Billions
+  const billions = Math.floor(num / 1000000000)
+  if (billions > 0) {
+    parts.push(convertHundredsRu(billions) + ' ' + getRussianScaleWord(billions, 'миллиард', 'миллиарда', 'миллиардов'))
+    num %= 1000000000
+  }
+
+  // Millions
+  const millions = Math.floor(num / 1000000)
+  if (millions > 0) {
+    parts.push(convertHundredsRu(millions) + ' ' + getRussianScaleWord(millions, 'миллион', 'миллиона', 'миллионов'))
+    num %= 1000000
+  }
+
+  // Thousands (feminine in Russian: одна тысяча, две тысячи)
+  const thousands = Math.floor(num / 1000)
+  if (thousands > 0) {
+    let thousandsWord = convertHundredsRu(thousands)
+    // Replace masculine with feminine for 1 and 2
+    thousandsWord = thousandsWord.replace(/\bодин\b/, 'одна').replace(/\bдва\b/, 'две')
+    parts.push(thousandsWord + ' ' + getRussianScaleWord(thousands, 'тысяча', 'тысячи', 'тысяч'))
+    num %= 1000
+  }
+
+  // Remainder
+  if (num > 0) {
+    parts.push(convertHundredsRu(num))
+  }
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+function numberToWordsEn(num: number): string {
+  if (num === 0) return 'zero'
+  if (num >= 1000000000000000) return 'too much'
+
+  const parts: string[] = []
+
+  // Trillions
+  const trillions = Math.floor(num / 1000000000000)
+  if (trillions > 0) {
+    parts.push(convertHundredsEn(trillions) + ' trillion')
+    num %= 1000000000000
+  }
+
+  // Billions
+  const billions = Math.floor(num / 1000000000)
+  if (billions > 0) {
+    parts.push(convertHundredsEn(billions) + ' billion')
+    num %= 1000000000
+  }
+
+  // Millions
+  const millions = Math.floor(num / 1000000)
+  if (millions > 0) {
+    parts.push(convertHundredsEn(millions) + ' million')
+    num %= 1000000
+  }
+
+  // Thousands
+  const thousands = Math.floor(num / 1000)
+  if (thousands > 0) {
+    parts.push(convertHundredsEn(thousands) + ' thousand')
+    num %= 1000
+  }
+
+  // Remainder
+  if (num > 0) {
+    parts.push(convertHundredsEn(num))
+  }
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+
+// Transliteration maps for cross-language text
+
+// English to Cyrillic (for Russian TTS reading English words)
+const LATIN_TO_CYRILLIC: Record<string, string> = {
+  'a': 'а', 'b': 'б', 'c': 'к', 'd': 'д', 'e': 'е', 'f': 'ф', 'g': 'г',
+  'h': 'х', 'i': 'и', 'j': 'дж', 'k': 'к', 'l': 'л', 'm': 'м', 'n': 'н',
+  'o': 'о', 'p': 'п', 'q': 'к', 'r': 'р', 's': 'с', 't': 'т', 'u': 'у',
+  'v': 'в', 'w': 'в', 'x': 'кс', 'y': 'й', 'z': 'з',
+  // Common digraphs for better pronunciation
+  'sh': 'ш', 'ch': 'ч', 'th': 'з', 'ph': 'ф', 'wh': 'в',
+  'ck': 'к', 'gh': 'г', 'ng': 'нг', 'tion': 'шн', 'sion': 'жн',
+  'oo': 'у', 'ee': 'и', 'ea': 'и', 'ou': 'ау', 'ow': 'оу',
+  'ai': 'ей', 'ay': 'ей', 'ey': 'ей', 'ie': 'ай',
+  'igh': 'ай', 'ough': 'о',
+}
+
+// Cyrillic to Latin (for English TTS reading Russian words)
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'ye', 'ё': 'yo',
+  'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+  'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+  'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch',
+  'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+// Check if a word is primarily Latin characters
+function isLatinWord(word: string): boolean {
+  const latinChars = word.match(/[a-zA-Z]/g)
+  return latinChars !== null && latinChars.length > word.length / 2
+}
+
+// Check if a word is primarily Cyrillic characters
+function isCyrillicWord(word: string): boolean {
+  const cyrillicChars = word.match(/[а-яёА-ЯЁ]/g)
+  return cyrillicChars !== null && cyrillicChars.length > word.length / 2
+}
+
+// Transliterate Latin word to Cyrillic
+function latinToCyrillic(word: string): string {
+  let result = word.toLowerCase()
+
+  // Apply digraphs first (longer patterns)
+  const digraphs = Object.keys(LATIN_TO_CYRILLIC)
+    .filter(k => k.length > 1)
+    .sort((a, b) => b.length - a.length)
+
+  for (const digraph of digraphs) {
+    result = result.replace(new RegExp(digraph, 'g'), LATIN_TO_CYRILLIC[digraph])
+  }
+
+  // Then single characters
+  result = result.replace(/[a-z]/g, char => LATIN_TO_CYRILLIC[char] || char)
+
+  // Preserve original capitalization for first letter
+  if (word[0] === word[0].toUpperCase()) {
+    result = result.charAt(0).toUpperCase() + result.slice(1)
+  }
+
+  return result
+}
+
+// Transliterate Cyrillic word to Latin
+function cyrillicToLatin(word: string): string {
+  let result = ''
+  const lower = word.toLowerCase()
+
+  for (const char of lower) {
+    result += CYRILLIC_TO_LATIN[char] || char
+  }
+
+  // Preserve original capitalization for first letter
+  if (word[0] === word[0].toUpperCase()) {
+    result = result.charAt(0).toUpperCase() + result.slice(1)
+  }
+
+  return result
+}
+
+// Transliterate foreign words based on target language
+function transliterateForeignWords(text: string, language: string): string {
+  const isRussian = language.startsWith('ru')
+
+  // Split text into words while preserving delimiters
+  return text.replace(/[\w\u0400-\u04FF]+/g, (word) => {
+    if (isRussian) {
+      // Russian model: transliterate Latin words to Cyrillic
+      if (isLatinWord(word)) {
+        return latinToCyrillic(word)
+      }
+    } else {
+      // English model: transliterate Cyrillic words to Latin
+      if (isCyrillicWord(word)) {
+        return cyrillicToLatin(word)
+      }
+    }
+    return word
+  })
+}
+
+function convertNumbersToWords(text: string, language: string): string {
+  const isRussian = language.startsWith('ru')
+
+  // First apply basic rules (zeros, too long numbers)
+  const rules = isRussian ? RUSSIAN_NUMBER_RULES : ENGLISH_NUMBER_RULES
+  let result = text
+
+  for (const rule of rules) {
+    if (typeof rule.replacement === 'string') {
+      result = result.replace(rule.pattern, rule.replacement)
+    } else {
+      result = result.replace(rule.pattern, rule.replacement)
+    }
+  }
+
+  // Then convert remaining numbers to words
+  const numberToWords = isRussian ? numberToWordsRu : numberToWordsEn
+
+  result = result.replace(/\b\d+\b/g, (match) => {
+    const num = parseInt(match, 10)
+    if (isNaN(num)) return match
+    return numberToWords(num)
+  })
+
+  // Transliterate foreign words for better pronunciation
+  result = transliterateForeignWords(result, language)
+
+  return result
+}
+
 function cleanTextForTTS(text: string): string {
   return text
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
@@ -872,8 +1427,12 @@ function cleanTextForTTS(text: string): string {
 }
 
 // Split text into chunks
-function splitIntoChunks(text: string, maxLength: number = 1000): string[] {
-  const cleanedText = cleanTextForTTS(text)
+function splitIntoChunks(text: string, maxLength: number = 1000, language: string = 'en'): string[] {
+  let cleanedText = cleanTextForTTS(text)
+
+  // Convert numbers to words for better TTS pronunciation (Silero, Coqui)
+  cleanedText = convertNumbersToWords(cleanedText, language)
+
   const chunks: string[] = []
   const paragraphs = cleanedText.split(/\n\n+/)
   let currentChunk = ''
@@ -1057,14 +1616,14 @@ async function generateSpeechWithSilero(
   text: string,
   speakerPath: string,
   outputPath: string,
-  options: { rate?: string } = {}
+  options: { rate?: string; pitch?: number; timeStretch?: number } = {}
 ): Promise<void> {
   // Try to use TTS server first
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
     // Determine language from speaker path (e.g., "v5_ru/aidar" -> "ru")
     const language = speakerPath.includes('_ru') ? 'ru' : 'en'
-    await generateViaServer('silero', text, speakerPath, language, outputPath, options.rate)
+    await generateViaServer('silero', text, speakerPath, language, outputPath, options.rate, options.pitch, options.timeStretch)
     return
   }
 
@@ -1091,6 +1650,16 @@ async function generateSpeechWithSilero(
     // Add rate parameter if specified
     if (options.rate) {
       args.push('--rate', options.rate)
+    }
+
+    // Add pitch parameter if specified
+    if (options.pitch !== undefined && options.pitch !== 1.0) {
+      args.push('--pitch', options.pitch.toString())
+    }
+
+    // Add time stretch parameter if specified
+    if (options.timeStretch !== undefined && options.timeStretch !== 1.0) {
+      args.push('--time-stretch', options.timeStretch.toString())
     }
 
     const sileroProcess = spawn(pythonExe, args)
@@ -1293,13 +1862,13 @@ async function generateSpeechWithSileroForPreview(
   text: string,
   speakerPath: string,
   outputPath: string,
-  options: { rate?: string } = {}
+  options: { rate?: string; pitch?: number; timeStretch?: number } = {}
 ): Promise<void> {
   // Try to use TTS server first (abortable via HTTP)
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
     const language = speakerPath.includes('_ru') ? 'ru' : 'en'
-    await generateViaServerForPreview('silero', text, speakerPath, language, outputPath, options.rate)
+    await generateViaServerForPreview('silero', text, speakerPath, language, outputPath, options.rate, options.pitch, options.timeStretch)
     return
   }
 
@@ -1325,6 +1894,14 @@ async function generateSpeechWithSileroForPreview(
 
     if (options.rate) {
       args.push('--rate', options.rate)
+    }
+
+    if (options.pitch !== undefined && options.pitch !== 1.0) {
+      args.push('--pitch', options.pitch.toString())
+    }
+
+    if (options.timeStretch !== undefined && options.timeStretch !== 1.0) {
+      args.push('--time-stretch', options.timeStretch.toString())
     }
 
     const sileroProcess = spawn(pythonExe, args)
@@ -1507,68 +2084,116 @@ async function generateSpeechWithElevenLabs(
 }
 
 // ============= Unified Processing =============
-async function processChunk(
+
+// Generate audio for a single text chunk (no retries, no splitting)
+async function generateChunkAudio(
   chunk: string,
-  index: number,
+  outputFile: string,
+  voiceInfo: VoiceInfo,
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number }
+): Promise<void> {
+  switch (voiceInfo.provider) {
+    case 'rhvoice':
+      await generateSpeechWithRHVoice(chunk, voiceInfo.shortName, outputFile, options)
+      break
+
+    case 'piper':
+      if (!voiceInfo.modelPath) {
+        throw new Error('Model path required for Piper')
+      }
+      await generateSpeechWithPiper(chunk, voiceInfo.modelPath, outputFile, options)
+      break
+
+    case 'silero':
+      if (!voiceInfo.modelPath) {
+        throw new Error('Speaker path required for Silero')
+      }
+      await generateSpeechWithSilero(chunk, voiceInfo.modelPath, outputFile, { rate: options.rate, pitch: options.pitch, timeStretch: options.timeStretch })
+      break
+
+    case 'elevenlabs':
+      if (!voiceInfo.voiceId) {
+        throw new Error('Voice ID required for ElevenLabs')
+      }
+      await generateSpeechWithElevenLabs(chunk, voiceInfo.voiceId, outputFile, options)
+      break
+
+    case 'coqui':
+      if (!voiceInfo.modelPath) {
+        throw new Error('Speaker name required for Coqui')
+      }
+      await generateSpeechWithCoqui(chunk, voiceInfo.modelPath, voiceInfo.locale, outputFile)
+      break
+
+    default:
+      throw new Error(`Unknown provider: ${voiceInfo.provider}`)
+  }
+
+  if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
+    throw new Error('Audio file was not created or is empty')
+  }
+}
+
+// Split text in half at a sentence boundary if possible
+function splitTextInHalf(text: string): [string, string] {
+  const mid = Math.floor(text.length / 2)
+
+  // Look for sentence boundary near the middle (within 20% range)
+  const searchStart = Math.floor(mid * 0.8)
+  const searchEnd = Math.floor(mid * 1.2)
+  const searchRange = text.slice(searchStart, searchEnd)
+
+  // Find sentence-ending punctuation followed by space
+  const sentenceBreaks = /[.!?।。！？]+\s+/g
+  let bestBreak = -1
+  let match
+
+  while ((match = sentenceBreaks.exec(searchRange)) !== null) {
+    const absolutePos = searchStart + match.index + match[0].length
+    if (bestBreak === -1 || Math.abs(absolutePos - mid) < Math.abs(bestBreak - mid)) {
+      bestBreak = absolutePos
+    }
+  }
+
+  // If no sentence boundary found, split at word boundary near middle
+  if (bestBreak === -1) {
+    const spaceAfterMid = text.indexOf(' ', mid)
+    const spaceBeforeMid = text.lastIndexOf(' ', mid)
+
+    if (spaceAfterMid !== -1 && (spaceBeforeMid === -1 || (spaceAfterMid - mid) < (mid - spaceBeforeMid))) {
+      bestBreak = spaceAfterMid + 1
+    } else if (spaceBeforeMid !== -1) {
+      bestBreak = spaceBeforeMid + 1
+    } else {
+      // No space found, just split in the middle
+      bestBreak = mid
+    }
+  }
+
+  return [text.slice(0, bestBreak).trim(), text.slice(bestBreak).trim()]
+}
+
+// Process chunk with automatic splitting on failure
+// Returns array of audio files (1 if success, more if had to split)
+async function processChunkWithSplit(
+  chunk: string,
+  baseIndex: string,
   voiceInfo: VoiceInfo,
   tempDir: string,
   maxRetries: number,
   retryDelay: number,
-  options: { rate?: string; sentencePause?: number }
-): Promise<{ success: boolean; file?: string; error?: string }> {
-  let success = false
-  let lastError: Error | null = null
-  const tempFile = path.join(tempDir, `chunk_${index}.wav`)
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number },
+  maxSplitDepth: number = 3
+): Promise<{ success: boolean; files: string[]; error?: string }> {
+  const tempFile = path.join(tempDir, `chunk_${baseIndex}.wav`)
 
-  for (let attempt = 1; attempt <= maxRetries && !success; attempt++) {
+  // Try to process the chunk with retries
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // Route to appropriate provider
-      switch (voiceInfo.provider) {
-        case 'rhvoice':
-          await generateSpeechWithRHVoice(chunk, voiceInfo.shortName, tempFile, options)
-          break
-
-        case 'piper':
-          if (!voiceInfo.modelPath) {
-            throw new Error('Model path required for Piper')
-          }
-          await generateSpeechWithPiper(chunk, voiceInfo.modelPath, tempFile, options)
-          break
-
-        case 'silero':
-          if (!voiceInfo.modelPath) {
-            throw new Error('Speaker path required for Silero')
-          }
-          await generateSpeechWithSilero(chunk, voiceInfo.modelPath, tempFile, options)
-          break
-
-        case 'elevenlabs':
-          if (!voiceInfo.voiceId) {
-            throw new Error('Voice ID required for ElevenLabs')
-          }
-          await generateSpeechWithElevenLabs(chunk, voiceInfo.voiceId, tempFile, options)
-          break
-
-        case 'coqui':
-          if (!voiceInfo.modelPath) {
-            throw new Error('Speaker name required for Coqui')
-          }
-          await generateSpeechWithCoqui(chunk, voiceInfo.modelPath, voiceInfo.locale, tempFile)
-          break
-
-        default:
-          throw new Error(`Unknown provider: ${voiceInfo.provider}`)
-      }
-
-      if (fs.existsSync(tempFile) && fs.statSync(tempFile).size > 0) {
-        success = true
-        return { success: true, file: tempFile }
-      } else {
-        throw new Error('Audio file was not created or is empty')
-      }
+      await generateChunkAudio(chunk, tempFile, voiceInfo, options)
+      return { success: true, files: [tempFile] }
     } catch (error) {
-      lastError = error as Error
-      console.error(`Error processing chunk ${index + 1} (attempt ${attempt}/${maxRetries}):`, error)
+      console.error(`Error processing chunk ${baseIndex} (attempt ${attempt}/${maxRetries}):`, error)
 
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, retryDelay))
@@ -1576,17 +2201,96 @@ async function processChunk(
     }
   }
 
+  // All retries failed - try splitting if we haven't reached max depth
+  // and chunk is long enough to split (at least 50 chars)
+  if (maxSplitDepth > 0 && chunk.length >= 50) {
+    console.log(`Chunk ${baseIndex} failed after ${maxRetries} retries, splitting in half...`)
+
+    const [firstHalf, secondHalf] = splitTextInHalf(chunk)
+
+    if (firstHalf.length === 0 || secondHalf.length === 0) {
+      return { success: false, files: [], error: 'Failed to split chunk - one half is empty' }
+    }
+
+    // Process both halves recursively
+    const firstResult = await processChunkWithSplit(
+      firstHalf,
+      `${baseIndex}_a`,
+      voiceInfo,
+      tempDir,
+      maxRetries,
+      retryDelay,
+      options,
+      maxSplitDepth - 1
+    )
+
+    if (!firstResult.success) {
+      return { success: false, files: [], error: `First half failed: ${firstResult.error}` }
+    }
+
+    const secondResult = await processChunkWithSplit(
+      secondHalf,
+      `${baseIndex}_b`,
+      voiceInfo,
+      tempDir,
+      maxRetries,
+      retryDelay,
+      options,
+      maxSplitDepth - 1
+    )
+
+    if (!secondResult.success) {
+      return { success: false, files: [], error: `Second half failed: ${secondResult.error}` }
+    }
+
+    // Combine the files from both halves
+    return { success: true, files: [...firstResult.files, ...secondResult.files] }
+  }
+
   return {
     success: false,
-    error: lastError?.message || 'Unknown error'
+    files: [],
+    error: `Failed after ${maxRetries} retries (chunk too small to split or max depth reached)`
   }
+}
+
+// Legacy wrapper for backward compatibility
+async function processChunk(
+  chunk: string,
+  index: number,
+  voiceInfo: VoiceInfo,
+  tempDir: string,
+  maxRetries: number,
+  retryDelay: number,
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number }
+): Promise<{ success: boolean; file?: string; files?: string[]; error?: string }> {
+  const result = await processChunkWithSplit(
+    chunk,
+    String(index).padStart(4, '0'),
+    voiceInfo,
+    tempDir,
+    maxRetries,
+    retryDelay,
+    options,
+    3 // max split depth: can split up to 3 times (8 sub-chunks max)
+  )
+
+  if (result.success && result.files.length > 0) {
+    return {
+      success: true,
+      file: result.files[0], // First file for backward compat
+      files: result.files    // All files if split occurred
+    }
+  }
+
+  return { success: false, error: result.error }
 }
 
 export async function convertToSpeech(
   text: string,
   voiceShortName: string,
   outputPath: string,
-  options: { rate?: string; volume?: string; sentencePause?: number } = {},
+  options: { rate?: string; volume?: string; sentencePause?: number; pitch?: number; timeStretch?: number } = {},
   onProgress?: (progress: number, status: string) => void,
   isAborted?: () => boolean
 ): Promise<void> {
@@ -1608,19 +2312,26 @@ export async function convertToSpeech(
 
   // Silero and Coqui have token limits in the positional encoder.
   // Cyrillic/non-Latin text expands to more tokens, so use smaller chunks.
-  const maxChunkLength = (voiceInfo.provider === 'silero' || voiceInfo.provider === 'coqui') ? 500 : 1000
-  const chunks = splitIntoChunks(text, maxChunkLength)
+  // Coqui XTTS is especially sensitive, use even smaller chunks (250 chars)
+  const maxChunkLength = voiceInfo.provider === 'coqui' ? 250 :
+                         voiceInfo.provider === 'silero' ? 500 : 1000
+  // Pass language to convert numbers to words for Silero/Coqui
+  const language = voiceInfo.locale || 'en'
+  const chunks = splitIntoChunks(text, maxChunkLength, language)
 
   if (chunks.length === 0) {
     throw new Error('No text content to convert')
   }
 
   const totalChunks = chunks.length
-  const chunksPerPart = 100
+  // Coqui has smaller chunks, so use larger parts (200 instead of 100)
+  const chunksPerPart = voiceInfo.provider === 'coqui' ? 200 : 100
   const totalParts = Math.ceil(totalChunks / chunksPerPart)
 
-  const audioFiles: string[] = new Array(totalChunks)
+  // Each chunk can produce multiple files if it was split due to errors
+  const audioFilesPerChunk: string[][] = new Array(totalChunks)
   let successfulChunks = 0
+  let totalAudioFiles = 0 // Track actual number of audio files (including splits)
   const errors: Array<{ chunk: number; error: string }> = []
   const maxRetries = 3
   const retryDelay = 1000
@@ -1678,9 +2389,15 @@ export async function convertToSpeech(
         options
       )
 
-      if (result.success && result.file) {
-        audioFiles[currentIndex] = result.file
+      if (result.success && result.files && result.files.length > 0) {
+        audioFilesPerChunk[currentIndex] = result.files
+        totalAudioFiles += result.files.length
         successfulChunks++
+
+        // Log if chunk was split
+        if (result.files.length > 1) {
+          console.log(`Chunk ${currentIndex + 1} was split into ${result.files.length} parts`)
+        }
       } else {
         errors.push({
           chunk: currentIndex + 1,
@@ -1698,9 +2415,10 @@ export async function convertToSpeech(
         const avgTimePerChunk = recentTimes.reduce((a, b) => a + b, 0) / recentTimes.length
         const remainingChunks = totalChunks - completedChunks
         const estimatedRemainingMs = (remainingChunks * avgTimePerChunk) / concurrentLimit
-        statusMessage = `Осталось ~${formatTime(estimatedRemainingMs)} | Сегмент ${completedChunks} из ${totalChunks}`
+        const splitInfo = totalAudioFiles > completedChunks ? ` (${totalAudioFiles} audio)` : ''
+        statusMessage = `~${formatTime(estimatedRemainingMs)} remaining | Segment ${completedChunks} of ${totalChunks}${splitInfo}`
       } else {
-        statusMessage = `Вычисляем время... | Сегмент ${completedChunks} из ${totalChunks}`
+        statusMessage = `Calculating time... | Segment ${completedChunks} of ${totalChunks}`
       }
 
       onProgress?.(
@@ -1730,7 +2448,14 @@ export async function convertToSpeech(
     await Promise.all(batch)
   }
 
-  const validAudioFiles = audioFiles.filter(f => f !== undefined)
+  // Flatten audio files - each chunk may have produced multiple files if it was split
+  // Keep them in order: chunk 0 files, chunk 1 files, etc.
+  const validAudioFiles: string[] = []
+  for (let i = 0; i < audioFilesPerChunk.length; i++) {
+    if (audioFilesPerChunk[i] && audioFilesPerChunk[i].length > 0) {
+      validAudioFiles.push(...audioFilesPerChunk[i])
+    }
+  }
 
   if (validAudioFiles.length === 0) {
     try {
@@ -1757,6 +2482,11 @@ export async function convertToSpeech(
     )
   }
 
+  // Log if any chunks were split
+  if (validAudioFiles.length > successfulChunks) {
+    console.log(`Total audio files: ${validAudioFiles.length} (from ${successfulChunks} successful chunks, some were split)`)
+  }
+
   // Combine files into parts
   const outputBaseName = path.basename(outputPath, path.extname(outputPath))
 
@@ -1764,7 +2494,10 @@ export async function convertToSpeech(
     fs.mkdirSync(outputDir, { recursive: true })
   }
 
-  for (let partIndex = 0; partIndex < totalParts; partIndex++) {
+  // Recalculate parts based on actual audio files count
+  const actualTotalParts = Math.ceil(validAudioFiles.length / chunksPerPart)
+
+  for (let partIndex = 0; partIndex < actualTotalParts; partIndex++) {
     const startIdx = partIndex * chunksPerPart
     const endIdx = Math.min(startIdx + chunksPerPart, validAudioFiles.length)
     const partFiles = validAudioFiles.slice(startIdx, endIdx)
@@ -1772,13 +2505,13 @@ export async function convertToSpeech(
     if (partFiles.length === 0) continue
 
     const currentPart = partIndex + 1
-    const partProgress = 90 + Math.round((currentPart / totalParts) * 10)
+    const partProgress = 90 + Math.round((currentPart / actualTotalParts) * 10)
     onProgress?.(
       partProgress,
-      `Создание части ${currentPart} из ${totalParts} (сегменты ${startIdx + 1}-${endIdx})...`
+      `Creating part ${currentPart} of ${actualTotalParts} (files ${startIdx + 1}-${endIdx})...`
     )
 
-    const partOutputPath = totalParts > 1
+    const partOutputPath = actualTotalParts > 1
       ? path.join(outputDir, `${outputBaseName}_part${currentPart}.mp3`)
       : outputPath
 
@@ -1794,7 +2527,7 @@ export async function convertToSpeech(
     console.warn('Failed to clean up temp directory:', error)
   }
 
-  onProgress?.(100, `Conversion complete! Created ${totalParts} part(s).`)
+  onProgress?.(100, `Conversion complete! Created ${actualTotalParts} part(s).`)
 }
 
 
@@ -1805,7 +2538,7 @@ export async function convertToSpeech(
 export async function previewVoice(
   text: string,
   voiceShortName: string,
-  options: { rate?: string; sentencePause?: number } = {}
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number } = {}
 ): Promise<{ success: boolean; audioData?: string; error?: string }> {
   // Reset abort state
   previewAborted = false
@@ -1839,6 +2572,13 @@ export async function previewVoice(
 
   console.log('Preview paths:', { tempDir, tempWavFile, tempMp3File, voice: voiceShortName })
 
+  // Convert numbers to words for Silero and Coqui providers
+  let processedText = text
+  if (voiceInfo.provider === 'silero' || voiceInfo.provider === 'coqui') {
+    processedText = cleanTextForTTS(text)
+    processedText = convertNumbersToWords(processedText, voiceInfo.locale || 'en')
+  }
+
   try {
     // Generate audio based on provider (using abortable versions)
     switch (voiceInfo.provider) {
@@ -1857,7 +2597,7 @@ export async function previewVoice(
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Speaker path required for Silero' }
         }
-        await generateSpeechWithSileroForPreview(text, voiceInfo.modelPath, tempWavFile, options)
+        await generateSpeechWithSileroForPreview(processedText, voiceInfo.modelPath, tempWavFile, { rate: options.rate, pitch: options.pitch, timeStretch: options.timeStretch })
         break
 
       case 'elevenlabs':
@@ -1871,7 +2611,7 @@ export async function previewVoice(
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Speaker name required for Coqui' }
         }
-        await generateSpeechWithCoquiForPreview(text, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
+        await generateSpeechWithCoquiForPreview(processedText, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
         break
 
       default:

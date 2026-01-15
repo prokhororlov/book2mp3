@@ -141,6 +141,8 @@ function App() {
   const [selectedProvider, setSelectedProvider] = useState<string>('piper')
   const [availableProviders, setAvailableProviders] = useState<ProviderInfo[]>([])
   const [speed, setSpeed] = useState([1.0])
+  const [pitch, setPitch] = useState([1.0]) // Pitch adjustment (for Silero)
+  const [timeStretch, setTimeStretch] = useState([1.0]) // Time stretch via resampling (affects both speed and pitch, for Silero)
   const [sentencePause, setSentencePause] = useState([0.0]) // Pause between sentences in seconds (for Piper)
   const [isConverting, setIsConverting] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -148,7 +150,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const getDefaultPreviewText = (lang: string) => {
-    return lang.startsWith('en') ? 'Hello! This is an example of how the voice sounds.' : 'Привет! Это пример звучания голоса.'
+    return lang.startsWith('en') ? 'Hello! This is an example of how the voice sounds.' : 'Hello! This is an example of how the voice sounds.'
   }
   const [previewText, setPreviewText] = useState(() => getDefaultPreviewText('en'))
   const [isEditingPreview, setIsEditingPreview] = useState(false)
@@ -483,6 +485,16 @@ function App() {
       options.sentencePause = sentencePause[0]
     }
 
+    // Add pitch for Silero
+    if (selectedProvider === 'silero' && pitch[0] !== 1.0) {
+      options.pitch = pitch[0]
+    }
+
+    // Add time stretch for Silero
+    if (selectedProvider === 'silero' && timeStretch[0] !== 1.0) {
+      options.timeStretch = timeStretch[0]
+    }
+
     const result = await window.electronAPI.convertToSpeech(
       bookContent.fullText,
       selectedVoice,
@@ -540,6 +552,16 @@ function App() {
       // Add sentence pause for Piper
       if (selectedProvider === 'piper' && sentencePause[0] > 0) {
         options.sentencePause = sentencePause[0]
+      }
+
+      // Add pitch for Silero
+      if (selectedProvider === 'silero' && pitch[0] !== 1.0) {
+        options.pitch = pitch[0]
+      }
+
+      // Add time stretch for Silero
+      if (selectedProvider === 'silero' && timeStretch[0] !== 1.0) {
+        options.timeStretch = timeStretch[0]
       }
 
       const result = await window.electronAPI.previewVoice(previewText, selectedVoice, options)
@@ -1874,6 +1896,72 @@ function App() {
                               <span>2.0x</span>
                             </div>
                           </div>
+
+                          {/* Pitch Control (Silero only) */}
+                          {selectedProvider === 'silero' && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-sm">Pitch</Label>
+                                <span className="text-xs text-muted-foreground">
+                                  {pitch[0] <= 0.6 ? 'Very Low' : pitch[0] <= 0.8 ? 'Low' : pitch[0] <= 1.2 ? 'Normal' : pitch[0] <= 1.5 ? 'High' : 'Very High'}
+                                </span>
+                              </div>
+                              <Slider
+                                value={pitch}
+                                onValueChange={setPitch}
+                                min={0.5}
+                                max={2.0}
+                                step={0.1}
+                                disabled={isConverting}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                                <span>Low</span>
+                                <span>Normal</span>
+                                <span>High</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Time Stretch Control (Silero only) - affects both speed AND pitch via resampling */}
+                          {selectedProvider === 'silero' && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-sm">Time Stretch</Label>
+                                <span className="text-xs text-muted-foreground">
+                                  {timeStretch[0].toFixed(1)}x
+                                </span>
+                              </div>
+                              <Slider
+                                value={timeStretch}
+                                onValueChange={setTimeStretch}
+                                min={0.5}
+                                max={2.0}
+                                step={0.1}
+                                disabled={isConverting}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                                <span>0.5x</span>
+                                <span>1.0x</span>
+                                <span>1.5x</span>
+                                <span>2.0x</span>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground">
+                                Changes speed and pitch together (chipmunk effect)
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Silero auto-settings note */}
+                          {selectedProvider === 'silero' && (
+                            <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-md p-2 space-y-1">
+                              <p className="font-medium">Auto-enabled settings:</p>
+                              <ul className="list-disc list-inside space-y-0.5">
+                                <li>Automatic letter "ё" placement</li>
+                                <li>Automatic stress marks</li>
+                                <li>Numbers converted to words</li>
+                              </ul>
+                            </div>
+                          )}
 
                           {/* Sentence Pause (Piper only) */}
                           {selectedProvider === 'piper' && (
