@@ -2,7 +2,7 @@
 
 Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech technologies.
 
-<img width="1967" height="1435" alt="image" src="https://github.com/user-attachments/assets/ece4dcaa-98b1-4bb3-9c83-1d942ebd41e4" />
+<img width="1989" height="1807" alt="image" src="https://github.com/user-attachments/assets/13e6a800-a9da-4099-8f0a-005e5ce8dc94" />
 
 ## Features
 
