@@ -1502,13 +1502,9 @@ export async function installSilero(
       : undefined
 
     // Build pip install command based on accelerator
-    let pytorchPackages = 'torch torchvision torchaudio'
-    let indexUrl = PYTORCH_INDEX_URLS[accelerator]
-
-    // For Intel XPU, need additional package
-    if (accelerator === 'xpu') {
-      pytorchPackages = 'torch torchvision torchaudio intel-extension-for-pytorch'
-    }
+    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
+    const pytorchPackages = 'torch torchvision torchaudio'
+    const indexUrl = PYTORCH_INDEX_URLS[accelerator]
 
     const pytorchResult = await runPipWithProgress(
       targetPython,
@@ -1957,13 +1953,9 @@ export async function installCoqui(
     })
 
     // Build pip install command based on accelerator
-    let pytorchPackages = 'torch torchaudio'
+    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
+    const pytorchPackages = 'torch torchaudio'
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
-
-    // For Intel XPU, need additional package
-    if (accelerator === 'xpu') {
-      pytorchPackages = 'torch torchaudio intel-extension-for-pytorch'
-    }
 
     const pytorchResult = await runPipWithProgress(
       targetPython,
@@ -2406,18 +2398,14 @@ def detect_device():
         except:
             pass
 
-    # 2. Try Intel XPU
-    try:
-        import intel_extension_for_pytorch as ipex
-        if hasattr(torch, 'xpu') and torch.xpu.is_available():
-            device_info = {
-                "device": "xpu",
-                "backend": "xpu",
-                "gpu_name": torch.xpu.get_device_name(0) if hasattr(torch.xpu, 'get_device_name') else "Intel XPU"
-            }
-            return device_info
-    except ImportError:
-        pass
+    # 2. Try Intel XPU (native support in PyTorch 2.5+)
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        device_info = {
+            "device": "xpu",
+            "backend": "xpu",
+            "gpu_name": torch.xpu.get_device_name(0) if hasattr(torch.xpu, 'get_device_name') else "Intel XPU"
+        }
+        return device_info
 
     # 3. DirectML (via ONNX Runtime) - note: Silero uses PyTorch, so DirectML helps only for ONNX models
     try:
@@ -2987,10 +2975,12 @@ export async function removeCoquiInstallation(): Promise<void> {
 }
 
 // PyTorch URLs for different accelerators
+// Note: Starting from PyTorch 2.5, Intel XPU is natively supported in PyTorch
+// without requiring intel-extension-for-pytorch
 const PYTORCH_INDEX_URLS: Record<AcceleratorType, string> = {
   cpu: 'https://download.pytorch.org/whl/cpu',
   cuda: 'https://download.pytorch.org/whl/cu118',
-  xpu: 'https://pytorch-extension.intel.com/release-whl/stable/xpu/us/'
+  xpu: 'https://download.pytorch.org/whl/xpu'
 }
 
 // Reinstall Silero with specified accelerator
@@ -3062,14 +3052,10 @@ export async function reinstallSileroWithAccelerator(
     }
     
     // Install PyTorch with specified accelerator
+    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
-    let packages = 'torch torchvision torchaudio'
-    
-    // For Intel XPU, we also need intel-extension-for-pytorch
-    if (accelerator === 'xpu') {
-      packages = 'torch torchvision torchaudio intel-extension-for-pytorch'
-    }
-    
+    const packages = 'torch torchvision torchaudio'
+
     onProgress({ stage: 'installing', message: `Устанавливаем PyTorch (${accelerator.toUpperCase()})...`, progress: 15 })
     
     const pytorchResult = await runPipWithProgress(
@@ -3127,11 +3113,12 @@ export async function reinstallSileroWithAccelerator(
     // Verify installation
     onProgress({ stage: 'installing', message: 'Проверяем установку...', progress: 94 })
     
-    let verifyCmd = `"${targetPython}" -c "import torch; print('OK')`
+    let verifyCmd = `"${targetPython}" -c "import torch; print('OK')"`
     if (accelerator === 'cuda') {
       verifyCmd = `"${targetPython}" -c "import torch; print('CUDA' if torch.cuda.is_available() else 'CPU')"`
     } else if (accelerator === 'xpu') {
-      verifyCmd = `"${targetPython}" -c "import torch; import intel_extension_for_pytorch as ipex; print('XPU' if hasattr(torch, 'xpu') and torch.xpu.is_available() else 'CPU')"`
+      // PyTorch 2.5+ has native XPU support, no need to import intel_extension_for_pytorch
+      verifyCmd = `"${targetPython}" -c "import torch; print('XPU' if hasattr(torch, 'xpu') and torch.xpu.is_available() else 'CPU')"`
     }
     
     const { stdout } = await execAsync(verifyCmd, { timeout: 30000 })
@@ -3245,13 +3232,10 @@ export async function reinstallCoquiWithAccelerator(
     }
     
     // Install PyTorch with specified accelerator
+    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
-    let packages = 'torch torchaudio'
-    
-    if (accelerator === 'xpu') {
-      packages = 'torch torchaudio intel-extension-for-pytorch'
-    }
-    
+    const packages = 'torch torchaudio'
+
     onProgress({ stage: 'installing', message: `Скачиваем PyTorch (${accelerator.toUpperCase()})...`, progress: 8 })
     
     const pytorchResult = await runPipWithProgress(
