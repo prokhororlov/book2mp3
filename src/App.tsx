@@ -1124,7 +1124,6 @@ function App() {
             <CardContent className="space-y-4 pb-6">
               {/* Provider Selection */}
               <div className="space-y-3">
-                <Label className="text-sm">TTS Provider</Label>
                 <div className="flex flex-wrap gap-2 lg:flex-nowrap">
                   {availableProviders.map(provider => {
                     const isAvailable = getProviderAvailability(provider.id)
