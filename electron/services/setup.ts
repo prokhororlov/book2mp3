@@ -1520,15 +1520,17 @@ export async function installSilero(
       : undefined
 
     // Build pip install command based on accelerator
-    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
+    // Note: XPU requires nightly builds on Windows (--pre flag)
     const pytorchPackages = 'torch torchvision torchaudio'
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
+    const extraArgs = accelerator === 'xpu' ? ['--pre'] : []
 
     const pytorchResult = await runPipWithProgress(
       targetPython,
       pytorchPackages,
       {
         indexUrl,
+        extraArgs,
         timeout: accelerator === 'cpu' ? 600000 : 1800000, // 30 min for GPU versions
         targetDir: embeddedTargetDir,
         onProgress: (info) => {
@@ -1971,15 +1973,17 @@ export async function installCoqui(
     })
 
     // Build pip install command based on accelerator
-    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
+    // Note: XPU requires nightly builds on Windows (--pre flag)
     const pytorchPackages = 'torch torchaudio'
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
+    const extraArgs = accelerator === 'xpu' ? ['--pre'] : []
 
     const pytorchResult = await runPipWithProgress(
       targetPython,
       pytorchPackages,
       {
         indexUrl,
+        extraArgs,
         timeout: accelerator === 'cpu' ? 1200000 : 2400000, // 40 min for GPU versions
         targetDir: embeddedTargetDir,
         onProgress: (info) => {
@@ -2993,12 +2997,11 @@ export async function removeCoquiInstallation(): Promise<void> {
 }
 
 // PyTorch URLs for different accelerators
-// Note: Starting from PyTorch 2.5, Intel XPU is natively supported in PyTorch
-// without requiring intel-extension-for-pytorch
+// Note: XPU stable wheels are Linux-only, Windows requires nightly builds
 const PYTORCH_INDEX_URLS: Record<AcceleratorType, string> = {
   cpu: 'https://download.pytorch.org/whl/cpu',
   cuda: 'https://download.pytorch.org/whl/cu118',
-  xpu: 'https://download.pytorch.org/whl/xpu'
+  xpu: 'https://download.pytorch.org/whl/nightly/xpu'
 }
 
 // Reinstall Silero with specified accelerator
@@ -3070,17 +3073,20 @@ export async function reinstallSileroWithAccelerator(
     }
     
     // Install PyTorch with specified accelerator
-    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
+    // Note: XPU requires nightly builds on Windows (--pre flag)
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
     const packages = 'torch torchvision torchaudio'
+    // XPU on Windows requires nightly/pre-release builds
+    const extraArgs = accelerator === 'xpu' ? ['--pre'] : []
 
     onProgress({ stage: 'installing', message: `Устанавливаем PyTorch (${accelerator.toUpperCase()})...`, progress: 15 })
-    
+
     const pytorchResult = await runPipWithProgress(
       targetPython,
       packages,
       {
         indexUrl,
+        extraArgs,
         timeout: 900000, // 15 minutes for CUDA download
         targetDir: embeddedTargetDir,
         onProgress: (info) => {
@@ -3250,17 +3256,19 @@ export async function reinstallCoquiWithAccelerator(
     }
     
     // Install PyTorch with specified accelerator
-    // Note: XPU is natively supported in PyTorch 2.5+, no extra packages needed
+    // Note: XPU requires nightly builds on Windows (--pre flag)
     const indexUrl = PYTORCH_INDEX_URLS[accelerator]
     const packages = 'torch torchaudio'
+    const extraArgs = accelerator === 'xpu' ? ['--pre'] : []
 
     onProgress({ stage: 'installing', message: `Скачиваем PyTorch (${accelerator.toUpperCase()})...`, progress: 8 })
-    
+
     const pytorchResult = await runPipWithProgress(
       targetPython,
       packages,
       {
         indexUrl,
+        extraArgs,
         timeout: 1200000,
         targetDir: embeddedTargetDir,
         onProgress: (info) => {
