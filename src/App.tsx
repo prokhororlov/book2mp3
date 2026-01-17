@@ -26,6 +26,7 @@ const FemaleIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 import { SetupScreen } from '@/components/SetupScreen'
+import { TitleBar } from '@/components/TitleBar'
 
 interface BookContent {
   title: string
@@ -1018,16 +1019,10 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-4xl mx-auto space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileAudio className="h-6 w-6 text-primary" />
-            <h1 className="text-xl font-bold">Book to MP3</h1>
-            <span className="text-xs text-muted-foreground hidden sm:inline">- Convert books to audio</span>
-          </div>
-          <div className="flex items-center gap-1">
+    <div className="h-screen flex flex-col bg-background">
+      <TitleBar
+        actions={
+          <>
             <Button
               variant="ghost"
               size="icon"
@@ -1055,8 +1050,11 @@ function App() {
             >
               {getThemeIcon()}
             </Button>
-          </div>
-        </div>
+          </>
+        }
+      />
+      <div className="flex-1 overflow-auto p-4">
+        <div className="max-w-4xl mx-auto space-y-4">
 
         {/* File Drop Zone */}
         <Card>
@@ -2753,6 +2751,7 @@ function App() {
           </Card>
         </div>
       )}
+      </div>
     </div>
   )
 }

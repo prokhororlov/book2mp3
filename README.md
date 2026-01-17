@@ -1,4 +1,4 @@
-# Book to MP3 Converter
+# VoiceCraft
 
 Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech technologies.
 
@@ -107,7 +107,7 @@ ELEVENLABS_API_KEY=your_api_key_here
 1. **Clone repository**
 ```bash
 git clone <repo-url>
-cd book-to-mp3
+cd voicecraft
 ```
 
 2. **Install dependencies**
@@ -193,7 +193,7 @@ npm run package
 ## Project Structure
 
 ```
-book-to-mp3/
+voicecraft/
 ├── electron/               # Electron main process
 │   ├── main.ts            # Main process
 │   ├── preload.ts         # Preload script

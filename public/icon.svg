@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e1815"/>
+      <stop offset="50%" style="stop-color:#161412"/>
+      <stop offset="100%" style="stop-color:#0f0d0b"/>
+    </linearGradient>
+
+    <!-- Icon gradient -->
+    <linearGradient id="iconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59542"/>
+      <stop offset="50%" style="stop-color:#e87a30"/>
+      <stop offset="100%" style="stop-color:#d4691f"/>
+    </linearGradient>
+
+  </defs>
+
+  <!-- Background container with rounded corners -->
+  <rect x="0" y="0" width="120" height="120" rx="20" ry="20" fill="url(#bgGradient)"/>
+
+  <!-- Subtle inner border effect -->
+  <rect x="1" y="1" width="118" height="118" rx="19" ry="19" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+
+  <!-- FileAudio icon -->
+  <!-- File with fold (combined path) -->
+  <path d="M76.5 90h1.5a6 6 0 0 0 6-6V45l-15-15H42a6 6 0 0 0-6 6v9 M66 30v12a6 6 0 0 0 6 6h12" fill="none" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Headphones (scaled) -->
+  <g transform="translate(24, 24) scale(3)">
+    <path d="M2 19a2 2 0 1 1 4 0v1a2 2 0 1 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 1 1-4 0v-1a2 2 0 1 1 4 0" fill="none" stroke="url(#iconGradient)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

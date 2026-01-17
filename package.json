@@ -1,6 +1,6 @@
 {
-  "name": "book-to-mp3",
-  "version": "1.0.0",
+  "name": "voicecraft",
+  "version": "1.1.7",
   "description": "Convert books (FB2, EPUB, TXT) to MP3 using text-to-speech",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -60,14 +60,16 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.booktomp3.app",
-    "productName": "Book to MP3",
+    "appId": "com.voicecraft.app",
+    "productName": "VoiceCraft",
     "directories": {
       "output": "release"
     },
+    "icon": "build/icon",
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "build/**/*"
     ],
     "win": {
       "target": [
@@ -78,6 +80,7 @@
           ]
         }
       ],
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
@@ -88,10 +91,12 @@
     },
     "mac": {
       "target": "dmg",
+      "icon": "build/icon.png",
       "artifactName": "${productName}-${version}-macOS.${ext}"
     },
     "linux": {
       "target": "AppImage",
+      "icon": "build",
       "artifactName": "${productName}-${version}-Linux.${ext}"
     },
     "asar": true,

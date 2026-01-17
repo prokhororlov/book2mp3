@@ -18,17 +18,23 @@ const getIsDev = () => process.env.NODE_ENV === 'development' || !app.isPackaged
 function createWindow() {
   Menu.setApplicationMenu(null)
 
+  // Get icon path - works for both dev and production
+  // In dev: __dirname is dist-electron, so go up one level
+  // In prod: __dirname is dist-electron inside asar, build is included
+  const iconPath = path.join(__dirname, '../build/icon.ico')
+
   mainWindow = new BrowserWindow({
     width: 900,
     height: 700,
     minWidth: 600,
     minHeight: 500,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
-    titleBarStyle: 'hiddenInset',
+    frame: false,
     show: false,
   })
 
@@ -52,6 +58,15 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+
+  // Notify renderer about maximize/unmaximize state changes
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window-maximized-change', true)
+  })
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window-maximized-change', false)
   })
 }
 
@@ -561,5 +576,26 @@ ipcMain.handle('install-update', async (_event, installerPath: string) => {
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
+})
+
+// Window controls for custom titlebar
+ipcMain.handle('window-minimize', () => {
+  mainWindow?.minimize()
+})
+
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize()
+  } else {
+    mainWindow?.maximize()
+  }
+})
+
+ipcMain.handle('window-close', () => {
+  mainWindow?.close()
+})
+
+ipcMain.handle('window-is-maximized', () => {
+  return mainWindow?.isMaximized() ?? false
 })
 

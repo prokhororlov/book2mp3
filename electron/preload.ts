@@ -318,6 +318,25 @@ const electronAPI = {
     ipcRenderer.on('update-download-progress', handler)
     return () => ipcRenderer.removeListener('update-download-progress', handler)
   },
+
+  // Window controls for custom titlebar
+  windowMinimize: (): Promise<void> =>
+    ipcRenderer.invoke('window-minimize'),
+
+  windowMaximize: (): Promise<void> =>
+    ipcRenderer.invoke('window-maximize'),
+
+  windowClose: (): Promise<void> =>
+    ipcRenderer.invoke('window-close'),
+
+  windowIsMaximized: (): Promise<boolean> =>
+    ipcRenderer.invoke('window-is-maximized'),
+
+  onWindowMaximizedChange: (callback: (isMaximized: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, isMaximized: boolean) => callback(isMaximized)
+    ipcRenderer.on('window-maximized-change', handler)
+    return () => ipcRenderer.removeListener('window-maximized-change', handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)
