@@ -6,7 +6,7 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings, ChevronRight, Info, CheckCircle, MonitorSpeaker, Circle, Square } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings, ChevronRight, ChevronDown, Info, CheckCircle, MonitorSpeaker, Circle, Square } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 // Gender icons as inline SVG components with subtle, theme-appropriate colors
@@ -135,6 +135,42 @@ function App() {
     }
     fetchProviders()
   }, [])
+
+  // Detect available compute devices on app start
+  // Helper to update device-related state from server status
+  const updateDeviceState = (status: NonNullable<typeof ttsServerStatus>) => {
+    setTtsServerStatus(status)
+    if (status.available_devices?.length > 0) {
+      setAvailableDevices(status.available_devices)
+    }
+    if (status.preferred_device) {
+      setPreferredDevice(status.preferred_device)
+    }
+  }
+
+  useEffect(() => {
+    const detectDevices = async () => {
+      if (!window.electronAPI) return
+      try {
+        // Start TTS server to detect devices
+        await window.electronAPI.ttsServerStart()
+        // Poll for status
+        for (let i = 0; i < 30; i++) {
+          await new Promise(r => setTimeout(r, 500))
+          const status = await window.electronAPI.ttsServerStatus()
+          if (status.running) {
+            updateDeviceState(status)
+            // Don't stop server - leave it running for faster model loading
+            break
+          }
+        }
+      } catch (e) {
+        console.error('Failed to detect devices:', e)
+      }
+    }
+    detectDevices()
+  }, [])
+
   const [voices, setVoices] = useState<VoiceInfo[]>([])
   const [isLoadingVoices, setIsLoadingVoices] = useState(true)
   const [selectedVoice, setSelectedVoice] = useState<string>('')
@@ -150,7 +186,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const getDefaultPreviewText = (lang: string) => {
-    return lang.startsWith('en') ? 'Hello! This is an example of how the voice sounds.' : 'Hello! This is an example of how the voice sounds.'
+    return lang.startsWith('en') ? 'Hello! This is an example of how the voice sounds.' : 'Привет! Это пример того, как звучит голос.'
   }
   const [previewText, setPreviewText] = useState(() => getDefaultPreviewText('en'))
   const [isEditingPreview, setIsEditingPreview] = useState(false)
@@ -192,8 +228,26 @@ function App() {
     memory_gb: number
     cpu_percent: number
     device: string
+    backend: string
+    gpu_name: string | null
+    preferred_device: string
+    available_devices: Array<{
+      id: string
+      name: string
+      available: boolean
+      description: string
+    }>
   } | null>(null)
   const [isLoadingModel, setIsLoadingModel] = useState<string | null>(null)
+  const [deviceSelectOpen, setDeviceSelectOpen] = useState(false)
+  // Separate state for device selection that persists when server is stopped
+  const [preferredDevice, setPreferredDevice] = useState<string>('cpu')
+  const [availableDevices, setAvailableDevices] = useState<Array<{
+    id: string
+    name: string
+    available: boolean
+    description: string
+  }>>([{ id: 'cpu', name: 'CPU', available: true, description: 'Central Processing Unit' }])
 
   // Piper voice installation state
   const [installingVoice, setInstallingVoice] = useState<string | null>(null)
@@ -654,7 +708,7 @@ function App() {
     if (!window.electronAPI) return
     try {
       const status = await window.electronAPI.ttsServerStatus()
-      setTtsServerStatus(status)
+      updateDeviceState(status)
     } catch (err) {
       console.error('Failed to get server status:', err)
     }
@@ -684,18 +738,34 @@ function App() {
     try {
       await window.electronAPI.ttsModelUnload(engine, language)
       const status = await window.electronAPI.ttsServerStatus()
-      setTtsServerStatus(status)
+      updateDeviceState(status)
 
       // Stop server if no models are loaded
       const hasLoadedModels = status.silero.ru_loaded || status.silero.en_loaded || status.coqui.loaded
       if (status.running && !hasLoadedModels) {
         await window.electronAPI.ttsServerStop()
-        await refreshServerStatus()
+        // Don't call refreshServerStatus - it will fail since server is stopped
+        // Just update ttsServerStatus to indicate not running
+        setTtsServerStatus(prev => prev ? { ...prev, running: false } : null)
       }
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setIsLoadingModel(null)
+    }
+  }
+
+  const handleDeviceChange = async (deviceId: string) => {
+    if (!window.electronAPI) return
+    // Update local state immediately for responsive UI
+    setPreferredDevice(deviceId)
+    try {
+      await window.electronAPI.ttsSetDevice(deviceId)
+      // Refresh status to get updated preferred_device
+      const status = await window.electronAPI.ttsServerStatus()
+      updateDeviceState(status)
+    } catch (err) {
+      console.error('Failed to set device:', err)
     }
   }
 
@@ -1259,6 +1329,94 @@ function App() {
                           <div className="font-medium text-sm">Silero TTS</div>
                           <span className="text-xs text-muted-foreground">Neural voices</span>
                         </div>
+                        {/* Device selector dropdown */}
+                        <div className="relative">
+                          {(() => {
+                            const anyModelLoaded = ttsServerStatus?.silero.ru_loaded ||
+                              ttsServerStatus?.silero.en_loaded ||
+                              ttsServerStatus?.coqui.loaded
+                            const isLocked = anyModelLoaded || isLoadingModel !== null
+                            const displayDevice = preferredDevice
+
+                            return (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    if (!isLocked) setDeviceSelectOpen(!deviceSelectOpen)
+                                  }}
+                                  disabled={isLocked}
+                                  title={isLocked ? 'Unload models to change device' : 'Select compute device'}
+                                  className={`
+                                    flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-all
+                                    ${displayDevice === 'cuda'
+                                      ? 'bg-green-500/20 text-green-600 dark:text-green-400' + (!isLocked ? ' hover:bg-green-500/30' : '')
+                                      : displayDevice === 'xpu'
+                                        ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' + (!isLocked ? ' hover:bg-blue-500/30' : '')
+                                        : 'bg-muted/50 text-muted-foreground' + (!isLocked ? ' hover:bg-muted' : '')
+                                    }
+                                    ${isLocked ? 'opacity-70 cursor-default' : 'cursor-pointer'}
+                                    focus:outline-none
+                                  `}
+                                >
+                                  <Cpu className="h-3 w-3" />
+                                  {displayDevice.toUpperCase()}
+                                  {!isLocked && <ChevronDown className={`h-3 w-3 transition-transform ${deviceSelectOpen ? 'rotate-180' : ''}`} />}
+                                </button>
+                                {deviceSelectOpen && !isLocked && (
+                                  <>
+                                    <div
+                                      className="fixed inset-0 z-10"
+                                      onClick={() => setDeviceSelectOpen(false)}
+                                    />
+                                    <div className="absolute right-0 top-full mt-1 z-20 bg-popover border rounded-lg shadow-lg py-1 min-w-[160px]">
+                                      {availableDevices.map((dev) => {
+                                        const isSelected = dev.id === preferredDevice
+                                        const isAvailable = dev.available
+
+                                        return (
+                                          <button
+                                            key={dev.id}
+                                            onClick={() => {
+                                              if (isAvailable) {
+                                                handleDeviceChange(dev.id)
+                                                setDeviceSelectOpen(false)
+                                              }
+                                            }}
+                                            disabled={!isAvailable}
+                                            className={`
+                                              w-full px-3 py-1.5 text-left text-xs
+                                              ${isSelected
+                                                ? 'bg-accent text-accent-foreground'
+                                                : isAvailable
+                                                  ? 'hover:bg-accent/50'
+                                                  : ''
+                                              }
+                                              ${!isAvailable ? 'text-muted-foreground/50 cursor-not-allowed' : ''}
+                                              focus:outline-none
+                                            `}
+                                          >
+                                            <div className="flex items-center justify-between gap-2">
+                                              <span className="flex items-center gap-2">
+                                                <Cpu className="h-3 w-3" />
+                                                {dev.name}
+                                              </span>
+                                              {isSelected && <Check className="h-3 w-3" />}
+                                            </div>
+                                            {!isAvailable && (
+                                              <div className="text-[10px] text-muted-foreground/40 ml-5">
+                                                not detected
+                                              </div>
+                                            )}
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
+                                  </>
+                                )}
+                              </>
+                            )
+                          })()}
+                        </div>
                       </div>
 
                       {/* Language chips */}
@@ -1331,6 +1489,94 @@ function App() {
                         <div className="flex items-center gap-2">
                           <div className="font-medium text-sm">Coqui XTTS-v2</div>
                           <span className="text-xs text-muted-foreground">Multilingual neural voices</span>
+                        </div>
+                        {/* Device selector dropdown */}
+                        <div className="relative">
+                          {(() => {
+                            const anyModelLoaded = ttsServerStatus?.silero.ru_loaded ||
+                              ttsServerStatus?.silero.en_loaded ||
+                              ttsServerStatus?.coqui.loaded
+                            const isLocked = anyModelLoaded || isLoadingModel !== null
+                            const displayDevice = preferredDevice
+
+                            return (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    if (!isLocked) setDeviceSelectOpen(!deviceSelectOpen)
+                                  }}
+                                  disabled={isLocked}
+                                  title={isLocked ? 'Unload models to change device' : 'Select compute device'}
+                                  className={`
+                                    flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-all
+                                    ${displayDevice === 'cuda'
+                                      ? 'bg-green-500/20 text-green-600 dark:text-green-400' + (!isLocked ? ' hover:bg-green-500/30' : '')
+                                      : displayDevice === 'xpu'
+                                        ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' + (!isLocked ? ' hover:bg-blue-500/30' : '')
+                                        : 'bg-muted/50 text-muted-foreground' + (!isLocked ? ' hover:bg-muted' : '')
+                                    }
+                                    ${isLocked ? 'opacity-70 cursor-default' : 'cursor-pointer'}
+                                    focus:outline-none
+                                  `}
+                                >
+                                  <Cpu className="h-3 w-3" />
+                                  {displayDevice.toUpperCase()}
+                                  {!isLocked && <ChevronDown className={`h-3 w-3 transition-transform ${deviceSelectOpen ? 'rotate-180' : ''}`} />}
+                                </button>
+                                {deviceSelectOpen && !isLocked && (
+                                  <>
+                                    <div
+                                      className="fixed inset-0 z-10"
+                                      onClick={() => setDeviceSelectOpen(false)}
+                                    />
+                                    <div className="absolute right-0 top-full mt-1 z-20 bg-popover border rounded-lg shadow-lg py-1 min-w-[160px]">
+                                      {availableDevices.map((dev) => {
+                                        const isSelected = dev.id === preferredDevice
+                                        const isAvailable = dev.available
+
+                                        return (
+                                          <button
+                                            key={dev.id}
+                                            onClick={() => {
+                                              if (isAvailable) {
+                                                handleDeviceChange(dev.id)
+                                                setDeviceSelectOpen(false)
+                                              }
+                                            }}
+                                            disabled={!isAvailable}
+                                            className={`
+                                              w-full px-3 py-1.5 text-left text-xs
+                                              ${isSelected
+                                                ? 'bg-accent text-accent-foreground'
+                                                : isAvailable
+                                                  ? 'hover:bg-accent/50'
+                                                  : ''
+                                              }
+                                              ${!isAvailable ? 'text-muted-foreground/50 cursor-not-allowed' : ''}
+                                              focus:outline-none
+                                            `}
+                                          >
+                                            <div className="flex items-center justify-between gap-2">
+                                              <span className="flex items-center gap-2">
+                                                <Cpu className="h-3 w-3" />
+                                                {dev.name}
+                                              </span>
+                                              {isSelected && <Check className="h-3 w-3" />}
+                                            </div>
+                                            {!isAvailable && (
+                                              <div className="text-[10px] text-muted-foreground/40 ml-5">
+                                                not detected
+                                              </div>
+                                            )}
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
+                                  </>
+                                )}
+                              </>
+                            )
+                          })()}
                         </div>
                       </div>
 

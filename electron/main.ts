@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
-import { convertToSpeech, getVoicesForLanguage, previewVoice, abortPreview, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
+import { convertToSpeech, getVoicesForLanguage, previewVoice, abortPreview, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, setPreferredDevice, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
 import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools } from './services/setup'
 
 // Load environment variables from .env file
@@ -470,5 +470,9 @@ ipcMain.handle('tts-model-load', async (_event, engine: 'silero' | 'coqui', lang
 
 ipcMain.handle('tts-model-unload', async (_event, engine: 'silero' | 'coqui' | 'all', language?: string) => {
   return unloadTTSModel(engine, language)
+})
+
+ipcMain.handle('tts-set-device', async (_event, device: string) => {
+  return setPreferredDevice(device)
 })
 

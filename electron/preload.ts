@@ -201,6 +201,15 @@ const electronAPI = {
     memory_gb: number
     cpu_percent: number
     device: string
+    backend: string
+    gpu_name: string | null
+    preferred_device: string
+    available_devices: Array<{
+      id: string
+      name: string
+      available: boolean
+      description: string
+    }>
   }> => ipcRenderer.invoke('tts-server-status'),
 
   ttsModelLoad: (engine: 'silero' | 'coqui', language?: string): Promise<{ success: boolean; memory_gb: number; error?: string }> =>
@@ -208,6 +217,9 @@ const electronAPI = {
 
   ttsModelUnload: (engine: 'silero' | 'coqui' | 'all', language?: string): Promise<{ success: boolean; memory_gb: number }> =>
     ipcRenderer.invoke('tts-model-unload', engine, language),
+
+  ttsSetDevice: (device: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('tts-set-device', device),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

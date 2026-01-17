@@ -44,7 +44,7 @@ export function abortPreview(): void {
   }
 }
 
-// Cleanup temp audio directory
+// Cleanup temp audio directory with retry logic for locked files
 export function cleanupTempAudio(outputDir?: string): void {
   const dirsToClean: string[] = []
 
@@ -57,13 +57,38 @@ export function cleanupTempAudio(outputDir?: string): void {
   }
 
   for (const tempDir of dirsToClean) {
+    cleanupDirWithRetry(tempDir)
+  }
+}
+
+// Helper to cleanup directory with retries (handles locked files)
+function cleanupDirWithRetry(dirPath: string, maxRetries: number = 3): void {
+  if (!fs.existsSync(dirPath)) return
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      if (fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true, force: true })
-        console.log(`Cleaned up temp directory: ${tempDir}`)
+      // First try to delete individual files
+      const files = fs.readdirSync(dirPath)
+      for (const file of files) {
+        const filePath = path.join(dirPath, file)
+        try {
+          fs.unlinkSync(filePath)
+        } catch {
+          // File might be locked, continue
+        }
       }
+      // Then remove the directory
+      fs.rmSync(dirPath, { recursive: true, force: true })
+      console.log(`Cleaned up temp directory: ${dirPath}`)
+      return
     } catch (error) {
-      console.warn(`Failed to clean up temp directory ${tempDir}:`, error)
+      if (attempt === maxRetries) {
+        console.warn(`Failed to clean up temp directory ${dirPath} after ${maxRetries} attempts:`, error)
+      } else {
+        // Wait a bit before retry (sync sleep using busy wait for simplicity)
+        const waitUntil = Date.now() + 100
+        while (Date.now() < waitUntil) { /* busy wait */ }
+      }
     }
   }
 }
@@ -116,6 +141,13 @@ export async function killOrphanTTSServers(): Promise<void> {
   }
 }
 
+export interface AvailableDevice {
+  id: string
+  name: string
+  available: boolean
+  description: string
+}
+
 export interface TTSServerStatus {
   running: boolean
   silero: {
@@ -128,6 +160,11 @@ export interface TTSServerStatus {
   memory_gb: number
   cpu_percent: number
   device: string
+  backend: string
+  gpu_name: string | null
+  preferred_device: string
+  available_devices: AvailableDevice[]
+  ipex_available: boolean
 }
 
 function getTTSServerScript(): string {
@@ -284,7 +321,12 @@ export async function getTTSServerStatus(): Promise<TTSServerStatus> {
       coqui: data.coqui,
       memory_gb: data.memory_gb,
       cpu_percent: data.cpu_percent || 0,
-      device: data.device
+      device: data.device,
+      backend: data.backend || 'unknown',
+      gpu_name: data.gpu_name || null,
+      preferred_device: data.preferred_device || data.device,
+      available_devices: data.available_devices || [],
+      ipex_available: data.ipex_available || false
     }
   } catch {
     return {
@@ -293,7 +335,12 @@ export async function getTTSServerStatus(): Promise<TTSServerStatus> {
       coqui: { loaded: false },
       memory_gb: 0,
       cpu_percent: 0,
-      device: 'unknown'
+      device: 'unknown',
+      backend: 'unknown',
+      gpu_name: null,
+      preferred_device: 'cpu',
+      available_devices: [{ id: 'cpu', name: 'CPU', available: true, description: 'CPU' }],
+      ipex_available: false
     }
   }
 }
@@ -341,6 +388,20 @@ export async function unloadTTSModel(
     }
   } catch {
     return { success: false, memory_gb: 0 }
+  }
+}
+
+export async function setPreferredDevice(device: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const body = JSON.stringify({ device })
+    const response = await httpRequest(`${TTS_SERVER_URL}/set-device`, 'POST', body)
+    const data = JSON.parse(response)
+    return { success: data.success }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    }
   }
 }
 
