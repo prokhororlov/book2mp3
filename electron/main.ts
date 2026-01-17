@@ -5,6 +5,7 @@ import { config } from 'dotenv'
 import { parseBook } from './services/parser'
 import { convertToSpeech, getVoicesForLanguage, previewVoice, abortPreview, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, setPreferredDevice, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
 import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools, installEmbeddedPython, checkEmbeddedPythonInstalled, getPythonInfo, getAvailableAccelerators, getCurrentAccelerator, reinstallSileroWithAccelerator, reinstallCoquiWithAccelerator, AcceleratorType, ReinstallProgress } from './services/setup'
+import { checkForUpdates, downloadUpdate, installUpdate, ReleaseInfo, DownloadProgress } from './services/updater'
 
 // Load environment variables from .env file
 config()
@@ -534,5 +535,31 @@ ipcMain.handle('tts-model-unload', async (_event, engine: 'silero' | 'coqui' | '
 
 ipcMain.handle('tts-set-device', async (_event, device: string) => {
   return setPreferredDevice(device)
+})
+
+// ==================== Update IPC Handlers ====================
+
+ipcMain.handle('check-for-updates', async () => {
+  return await checkForUpdates()
+})
+
+ipcMain.handle('download-update', async (event, releaseInfo: ReleaseInfo) => {
+  try {
+    const installerPath = await downloadUpdate(releaseInfo, (progress: DownloadProgress) => {
+      event.sender.send('update-download-progress', progress)
+    })
+    return { success: true, installerPath }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('install-update', async (_event, installerPath: string) => {
+  try {
+    await installUpdate(installerPath)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
 })
 

@@ -6,7 +6,7 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings, ChevronRight, ChevronDown, Info, CheckCircle, MonitorSpeaker, Circle, Square } from 'lucide-react'
+import { Book, Upload, Volume2, Play, Download, X, FileAudio, Languages, Sun, Moon, Zap, Cpu, Sparkles, Cloud, Pencil, Check, Loader2, Key, Eye, EyeOff, Wand2, AlertTriangle, Settings, ChevronRight, ChevronDown, Info, CheckCircle, MonitorSpeaker, Circle, Square, RefreshCw } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 // Gender icons as inline SVG components with subtle, theme-appropriate colors
@@ -282,6 +282,26 @@ function App() {
   const [isInstallingPiperCore, setIsInstallingPiperCore] = useState(false)
   const [piperCoreInstallProgress, setPiperCoreInstallProgress] = useState('')
   const [piperCoreInstallPercent, setPiperCoreInstallPercent] = useState(0)
+
+  // Update state
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean
+    currentVersion: string
+    latestVersion?: string
+    releaseInfo?: {
+      version: string
+      releaseDate: string
+      downloadUrl: string
+      releaseNotes: string
+      fileName: string
+    }
+    error?: string
+  } | null>(null)
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false)
+  const [updateDownloadProgress, setUpdateDownloadProgress] = useState(0)
+  const [updateInstallerPath, setUpdateInstallerPath] = useState<string | null>(null)
 
   // Load ElevenLabs API key and check Silero on mount
   useEffect(() => {
@@ -597,6 +617,58 @@ function App() {
     await window.electronAPI.abortConversion()
     setIsConverting(false)
     setStatus('Conversion cancelled')
+  }
+
+  // Update functions
+  const checkForUpdates = async (showModal = true) => {
+    if (!window.electronAPI || isCheckingUpdate) return
+    setIsCheckingUpdate(true)
+    try {
+      const result = await window.electronAPI.checkForUpdates()
+      setUpdateInfo(result)
+      if (result.hasUpdate && showModal) {
+        setShowUpdateModal(true)
+      }
+    } catch (err) {
+      console.error('Failed to check for updates:', err)
+    } finally {
+      setIsCheckingUpdate(false)
+    }
+  }
+
+  // Check for updates on app start (silently, without modal)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      checkForUpdates(false)
+    }, 3000) // Check after 3 seconds to not slow down startup
+    return () => clearTimeout(timer)
+  }, [])
+
+  const downloadAndInstallUpdate = async () => {
+    if (!window.electronAPI || !updateInfo?.releaseInfo || isDownloadingUpdate) return
+    setIsDownloadingUpdate(true)
+    setUpdateDownloadProgress(0)
+
+    // Subscribe to download progress
+    const unsubscribe = window.electronAPI.onUpdateDownloadProgress((data) => {
+      setUpdateDownloadProgress(data.percent)
+    })
+
+    try {
+      const result = await window.electronAPI.downloadUpdate(updateInfo.releaseInfo)
+      if (result.success && result.installerPath) {
+        setUpdateInstallerPath(result.installerPath)
+        // Install and quit
+        await window.electronAPI.installUpdate(result.installerPath)
+      } else {
+        setError(result.error || 'Failed to download update')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download update')
+    } finally {
+      unsubscribe()
+      setIsDownloadingUpdate(false)
+    }
   }
 
   const clearFile = () => {
@@ -955,15 +1027,35 @@ function App() {
             <h1 className="text-xl font-bold">Book to MP3</h1>
             <span className="text-xs text-muted-foreground hidden sm:inline">- Convert books to audio</span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-            className="h-8 w-8"
-          >
-            {getThemeIcon()}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => checkForUpdates(true)}
+              disabled={isCheckingUpdate}
+              aria-label="Check for updates"
+              className="h-8 w-8 relative"
+              title={updateInfo?.hasUpdate ? `Update available: v${updateInfo.latestVersion}` : "Check for updates"}
+            >
+              {isCheckingUpdate ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {updateInfo?.hasUpdate && !isCheckingUpdate && (
+                <span className="absolute top-0 right-0 h-1.5 w-1.5 bg-primary rounded-full" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              aria-label="Toggle theme"
+              className="h-8 w-8"
+            >
+              {getThemeIcon()}
+            </Button>
+          </div>
         </div>
 
         {/* File Drop Zone */}
@@ -2591,6 +2683,76 @@ function App() {
         </div>
       )}
 
+      {/* Update Modal */}
+      {showUpdateModal && updateInfo && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md mx-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-primary" />
+                {updateInfo.hasUpdate ? 'Update Available' : 'No Updates'}
+              </CardTitle>
+              <CardDescription>
+                {updateInfo.hasUpdate
+                  ? `Version ${updateInfo.latestVersion} is available (current: ${updateInfo.currentVersion})`
+                  : `You're running the latest version (${updateInfo.currentVersion})`
+                }
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {updateInfo.hasUpdate && updateInfo.releaseInfo && (
+                <>
+                  <Button
+                    variant="link"
+                    className="p-0 h-auto text-sm"
+                    onClick={() => window.open(`https://github.com/prokhororlov/book2mp3/compare/v${updateInfo.currentVersion}...v${updateInfo.latestVersion}`, '_blank')}
+                  >
+                    Full Changelog
+                  </Button>
+                  {isDownloadingUpdate && (
+                    <div className="space-y-2">
+                      <Progress value={updateDownloadProgress} />
+                      <p className="text-sm text-muted-foreground text-center">
+                        Downloading... {updateDownloadProgress}%
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+              {updateInfo.error && (
+                <p className="text-sm text-destructive">{updateInfo.error}</p>
+              )}
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowUpdateModal(false)}
+                  disabled={isDownloadingUpdate}
+                >
+                  {updateInfo.hasUpdate ? 'Later' : 'Close'}
+                </Button>
+                {updateInfo.hasUpdate && updateInfo.releaseInfo && (
+                  <Button
+                    onClick={downloadAndInstallUpdate}
+                    disabled={isDownloadingUpdate}
+                  >
+                    {isDownloadingUpdate ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Downloading...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download & Install
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

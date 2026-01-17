@@ -184,7 +184,7 @@ async function runPipWithProgress(
       lines.forEach(parseProgressLine)
     })
     
-    const timeout = options.timeout || 600000
+    const timeout = options.timeout || 86400000 // 24 hours
     const timeoutId = setTimeout(() => {
       proc.kill()
       resolve({ success: false, error: `Installation timeout after ${timeout / 1000} seconds` })

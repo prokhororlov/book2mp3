@@ -96,6 +96,29 @@ export interface ReinstallProgress {
   progress?: number
 }
 
+// Update types
+export interface ReleaseInfo {
+  version: string
+  releaseDate: string
+  downloadUrl: string
+  releaseNotes: string
+  fileName: string
+}
+
+export interface UpdateCheckResult {
+  hasUpdate: boolean
+  currentVersion: string
+  latestVersion?: string
+  releaseInfo?: ReleaseInfo
+  error?: string
+}
+
+export interface DownloadProgress {
+  percent: number
+  transferred: number
+  total: number
+}
+
 
 const electronAPI = {
   openFileDialog: (): Promise<string | null> =>
@@ -279,6 +302,22 @@ const electronAPI = {
 
   ttsSetDevice: (device: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('tts-set-device', device),
+
+  // Update management
+  checkForUpdates: (): Promise<UpdateCheckResult> =>
+    ipcRenderer.invoke('check-for-updates'),
+
+  downloadUpdate: (releaseInfo: ReleaseInfo): Promise<{ success: boolean; installerPath?: string; error?: string }> =>
+    ipcRenderer.invoke('download-update', releaseInfo),
+
+  installUpdate: (installerPath: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-update', installerPath),
+
+  onUpdateDownloadProgress: (callback: (data: DownloadProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: DownloadProgress) => callback(data)
+    ipcRenderer.on('update-download-progress', handler)
+    return () => ipcRenderer.removeListener('update-download-progress', handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)
