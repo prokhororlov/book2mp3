@@ -33,19 +33,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install rcedit and set icon
-        run: |
-          npm install -g rcedit
-          rcedit "release/win-unpacked/VoiceCraft.exe" --set-icon "build/icon.ico"
-        shell: pwsh
-
-      - name: Repackage NSIS installer with updated exe
-        run: |
-          Remove-Item -Force "release/*.exe" -ErrorAction SilentlyContinue
-          npx electron-builder --win nsis --prepackaged "release/win-unpacked"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: List release directory
         run: dir release
         shell: cmd
