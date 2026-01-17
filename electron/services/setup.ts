@@ -479,90 +479,20 @@ export async function installEmbeddedPython(
 
 // Check if system Python is available (checks embedded first, then system)
 export async function checkPythonAvailable(): Promise<string | null> {
-  // First check embedded Python
-  if (checkEmbeddedPythonInstalled()) {
-    const embeddedExe = getEmbeddedPythonExe()
-    try {
-      const { stdout, stderr } = await execAsync(`"${embeddedExe}" --version`, { timeout: 5000 })
-      const output = stdout + stderr
-      if (output.includes('Python 3')) {
-        return embeddedExe
-      }
-    } catch {
-      // Embedded Python check failed, continue to system Python
+  // Only use embedded Python - simpler and more reliable
+  if (!checkEmbeddedPythonInstalled()) {
+    return null
+  }
+
+  const embeddedExe = getEmbeddedPythonExe()
+  try {
+    const { stdout, stderr } = await execAsync(`"${embeddedExe}" --version`, { timeout: 5000 })
+    const output = stdout + stderr
+    if (output.includes('Python 3')) {
+      return embeddedExe
     }
-  }
-
-  // Helper to verify Python executable
-  const verifyPython = async (pythonPath: string): Promise<string | null> => {
-    try {
-      const quotedPath = pythonPath.includes(' ') ? `"${pythonPath}"` : pythonPath
-      const { stdout, stderr } = await execAsync(`${quotedPath} --version`, { timeout: 5000 })
-      const output = stdout + stderr
-      if (!output.includes('Python 3')) {
-        return null
-      }
-      // Verify it's 64-bit and compatible version
-      try {
-        const { stdout: archOut } = await execAsync(`${quotedPath} -c "import struct; print(struct.calcsize('P') * 8)"`, { timeout: 5000 })
-        if (archOut.trim() !== '64') {
-          console.log(`Skipping ${pythonPath}: 32-bit Python not supported`)
-          return null
-        }
-        // Check version is 3.8-3.12
-        const { stdout: verOut } = await execAsync(`${quotedPath} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"`, { timeout: 5000 })
-        const [major, minor] = verOut.trim().split('.').map(Number)
-        if (major !== 3 || minor < 8 || minor > 12) {
-          console.log(`Skipping ${pythonPath}: Python ${verOut.trim()} not supported (need 3.8-3.12)`)
-          return null
-        }
-      } catch {
-        // If we can't verify, still try to use it
-      }
-      return pythonPath
-    } catch {
-      return null
-    }
-  }
-
-  // First check PATH
-  const pythonCommands = ['python', 'python3', 'py']
-  for (const cmd of pythonCommands) {
-    const result = await verifyPython(cmd)
-    if (result) return result
-  }
-
-  // If not in PATH, search common installation locations
-  const userProfile = process.env.USERPROFILE || process.env.HOME || ''
-  const localAppData = process.env.LOCALAPPDATA || path.join(userProfile, 'AppData', 'Local')
-  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
-  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
-
-  // Common Python installation paths (sorted by preference: newer versions first)
-  const pythonSearchPaths: string[] = []
-
-  // Python versions to check (3.12 down to 3.8)
-  for (let minor = 12; minor >= 8; minor--) {
-    // User-installed Python (most common)
-    pythonSearchPaths.push(path.join(localAppData, 'Programs', 'Python', `Python3${minor}`, 'python.exe'))
-    // System-wide install
-    pythonSearchPaths.push(path.join(programFiles, `Python3${minor}`, 'python.exe'))
-    pythonSearchPaths.push(path.join(programFilesX86, `Python3${minor}`, 'python.exe'))
-    // Older style paths
-    pythonSearchPaths.push(`C:\\Python3${minor}\\python.exe`)
-  }
-
-  // Also check for pyenv-win
-  pythonSearchPaths.push(path.join(userProfile, '.pyenv', 'pyenv-win', 'shims', 'python.exe'))
-
-  for (const pythonPath of pythonSearchPaths) {
-    if (existsSync(pythonPath)) {
-      const result = await verifyPython(pythonPath)
-      if (result) {
-        console.log(`Found Python at: ${pythonPath}`)
-        return result
-      }
-    }
+  } catch {
+    // Embedded Python check failed
   }
 
   return null
@@ -570,32 +500,21 @@ export async function checkPythonAvailable(): Promise<string | null> {
 
 // Check if Python is available (system or embedded) - returns info about which one
 export async function getPythonInfo(): Promise<{ available: boolean; path: string | null; isEmbedded: boolean; version: string | null }> {
-  // First check embedded Python
-  if (checkEmbeddedPythonInstalled()) {
-    const embeddedExe = getEmbeddedPythonExe()
-    try {
-      const { stdout, stderr } = await execAsync(`"${embeddedExe}" --version`, { timeout: 5000 })
-      const output = stdout + stderr
-      const match = output.match(/Python (\d+\.\d+\.\d+)/)
-      if (match) {
-        return { available: true, path: embeddedExe, isEmbedded: true, version: match[1] }
-      }
-    } catch {
-      // Continue to system Python
-    }
+  // Only use embedded Python
+  if (!checkEmbeddedPythonInstalled()) {
+    return { available: false, path: null, isEmbedded: false, version: null }
   }
 
-  // Check system Python
-  const pythonCmd = await checkPythonAvailable()
-  if (pythonCmd && !pythonCmd.includes(getEmbeddedPythonPath())) {
-    try {
-      const { stdout, stderr } = await execAsync(`${pythonCmd} --version`, { timeout: 5000 })
-      const output = stdout + stderr
-      const match = output.match(/Python (\d+\.\d+\.\d+)/)
-      return { available: true, path: pythonCmd, isEmbedded: false, version: match ? match[1] : null }
-    } catch {
-      // Failed
+  const embeddedExe = getEmbeddedPythonExe()
+  try {
+    const { stdout, stderr } = await execAsync(`"${embeddedExe}" --version`, { timeout: 5000 })
+    const output = stdout + stderr
+    const match = output.match(/Python (\d+\.\d+\.\d+)/)
+    if (match) {
+      return { available: true, path: embeddedExe, isEmbedded: true, version: match[1] }
     }
+  } catch {
+    // Failed
   }
 
   return { available: false, path: null, isEmbedded: false, version: null }
@@ -1453,7 +1372,8 @@ export async function getEstimatedDownloadSize(): Promise<{ size: number; includ
 
 // Install Silero TTS (will auto-install embedded Python if system Python is not available)
 export async function installSilero(
-  onProgress: (progress: SetupProgress) => void
+  onProgress: (progress: SetupProgress) => void,
+  accelerator: AcceleratorType = 'cpu'
 ): Promise<{ success: boolean; error?: string }> {
   let pythonCmd = await checkPythonAvailable()
 
@@ -1568,11 +1488,12 @@ export async function installSilero(
       targetPython = venvPython
     }
 
-    // Install PyTorch CPU
+    // Install PyTorch with selected accelerator
+    const acceleratorLabel = accelerator === 'cuda' ? 'CUDA' : accelerator === 'xpu' ? 'Intel XPU' : 'CPU'
     onProgress({
       stage: 'silero',
       progress: scaleProgress(10),
-      details: 'Installing PyTorch (CPU)...'
+      details: `Installing PyTorch (${acceleratorLabel})...`
     })
 
     // For embedded Python, install to its Lib/site-packages
@@ -1580,16 +1501,25 @@ export async function installSilero(
       ? path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages')
       : undefined
 
+    // Build pip install command based on accelerator
+    let pytorchPackages = 'torch torchvision torchaudio'
+    let indexUrl = PYTORCH_INDEX_URLS[accelerator]
+
+    // For Intel XPU, need additional package
+    if (accelerator === 'xpu') {
+      pytorchPackages = 'torch torchvision torchaudio intel-extension-for-pytorch'
+    }
+
     const pytorchResult = await runPipWithProgress(
       targetPython,
-      'torch torchvision torchaudio',
+      pytorchPackages,
       {
-        indexUrl: 'https://download.pytorch.org/whl/cpu',
-        timeout: 600000,
+        indexUrl,
+        timeout: accelerator === 'cpu' ? 600000 : 1800000, // 30 min for GPU versions
         targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const progress = scaleProgress(10 + Math.round((info.percentage || 0) * 0.5))
-          let details = 'Installing PyTorch...'
+          let details = `Installing PyTorch (${acceleratorLabel})...`
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             details = `Downloading ${info.package}: ${info.percentage}%`
           }
@@ -1657,6 +1587,9 @@ export async function installSilero(
     if (!stdout.includes('OK')) {
       return { success: false, error: 'PyTorch verification failed' }
     }
+
+    // Save accelerator config
+    saveAcceleratorConfig('silero', accelerator)
 
     onProgress({
       stage: 'silero',
@@ -1871,7 +1804,8 @@ async function findVcvarsallPath(): Promise<string | null> {
 
 // Install Coqui TTS (requires Python and Visual Studio Build Tools)
 export async function installCoqui(
-  onProgress: (progress: SetupProgress) => void
+  onProgress: (progress: SetupProgress) => void,
+  accelerator: AcceleratorType = 'cpu'
 ): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> {
   let pythonCmd = await checkPythonAvailable()
 
@@ -2013,19 +1947,30 @@ export async function installCoqui(
       ? path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages')
       : undefined
 
-    // Install PyTorch CPU - range 5% to 40%
+    // Install PyTorch with selected accelerator - range 5% to 40%
+    const acceleratorLabel = accelerator === 'cuda' ? 'CUDA' : accelerator === 'xpu' ? 'Intel XPU' : 'CPU'
+    const pytorchSize = accelerator === 'cuda' ? '~2.3GB' : accelerator === 'xpu' ? '~500MB' : '~200MB'
     onProgress({
       stage: 'coqui',
       progress: scaleProgress(8),
-      details: 'Downloading PyTorch (~200MB)...'
+      details: `Downloading PyTorch ${acceleratorLabel} (${pytorchSize})...`
     })
+
+    // Build pip install command based on accelerator
+    let pytorchPackages = 'torch torchaudio'
+    const indexUrl = PYTORCH_INDEX_URLS[accelerator]
+
+    // For Intel XPU, need additional package
+    if (accelerator === 'xpu') {
+      pytorchPackages = 'torch torchaudio intel-extension-for-pytorch'
+    }
 
     const pytorchResult = await runPipWithProgress(
       targetPython,
-      'torch torchaudio',
+      pytorchPackages,
       {
-        indexUrl: 'https://download.pytorch.org/whl/cpu',
-        timeout: 1200000,
+        indexUrl,
+        timeout: accelerator === 'cpu' ? 1200000 : 2400000, // 40 min for GPU versions
         targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const baseProgress = 8
@@ -2044,7 +1989,7 @@ export async function installCoqui(
 
           const totalProgress = scaleProgress(Math.round(baseProgress + (subProgress / 100) * rangeSize))
 
-          let details = 'Installing PyTorch...'
+          let details = `Installing PyTorch ${acceleratorLabel}...`
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             if (info.downloaded !== undefined && info.total !== undefined) {
               details = `Downloading ${info.package}: ${info.downloaded.toFixed(1)}/${info.total.toFixed(1)} MB (${info.percentage}%)`
@@ -2340,6 +2285,9 @@ print("Model downloaded successfully")
     } finally {
       try { unlinkSync(preloadScriptPath) } catch {}
     }
+
+    // Save accelerator config
+    saveAcceleratorConfig('coqui', accelerator)
 
     onProgress({
       stage: 'coqui',
@@ -2807,6 +2755,705 @@ export async function installRHVoice(
     
     return { success: true }
   } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+}
+
+
+// ===============================================
+// GPU Detection and Accelerator Management
+// ===============================================
+
+export interface GPUInfo {
+  available: boolean
+  name?: string
+  vram?: number  // in MB
+}
+
+export interface AvailableAccelerators {
+  cpu: true
+  cuda: GPUInfo
+  xpu: GPUInfo
+}
+
+export type AcceleratorType = 'cpu' | 'cuda' | 'xpu'
+
+export interface AcceleratorConfig {
+  accelerator: AcceleratorType
+  installedAt: string
+  pytorchVersion?: string
+}
+
+export interface ReinstallProgress {
+  stage: 'stopping' | 'removing' | 'installing' | 'starting' | 'complete' | 'error'
+  message: string
+  progress?: number
+}
+
+// Check for NVIDIA GPU (CUDA support)
+export async function checkNvidiaGPU(): Promise<GPUInfo> {
+  try {
+    // Try nvidia-smi first (most reliable)
+    const { stdout } = await execAsync('nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits', { timeout: 10000 })
+    const lines = stdout.trim().split('\n')
+    if (lines.length > 0 && lines[0]) {
+      const [name, vramStr] = lines[0].split(',').map(s => s.trim())
+      const vram = parseInt(vramStr, 10)
+      return {
+        available: true,
+        name: name,
+        vram: isNaN(vram) ? undefined : vram
+      }
+    }
+  } catch {
+    // nvidia-smi not available, try PowerShell WMI query
+    try {
+      const { stdout } = await execAsync(
+        'powershell -Command "Get-CimInstance -ClassName Win32_VideoController | Where-Object { $_.Name -like \'*NVIDIA*\' } | Select-Object -First 1 -Property Name, AdapterRAM | ConvertTo-Json"',
+        { timeout: 15000 }
+      )
+      const data = JSON.parse(stdout.trim())
+      if (data && data.Name) {
+        const vram = data.AdapterRAM ? Math.round(data.AdapterRAM / (1024 * 1024)) : undefined
+        return {
+          available: true,
+          name: data.Name,
+          vram: vram
+        }
+      }
+    } catch {
+      // No NVIDIA GPU found
+    }
+  }
+  return { available: false }
+}
+
+// Check for Intel GPU (XPU/oneAPI support)
+export async function checkIntelGPU(): Promise<GPUInfo> {
+  try {
+    const { stdout } = await execAsync(
+      'powershell -Command "Get-CimInstance -ClassName Win32_VideoController | Where-Object { $_.Name -like \'*Intel*\' -and ($_.Name -like \'*Arc*\' -or $_.Name -like \'*Iris*\' -or $_.Name -like \'*UHD*\') } | Select-Object -First 1 -Property Name, AdapterRAM | ConvertTo-Json"',
+      { timeout: 15000 }
+    )
+    const data = JSON.parse(stdout.trim())
+    if (data && data.Name) {
+      // Check if it's a GPU that supports XPU (Arc, Iris Xe, UHD 7xx+)
+      const name = data.Name as string
+      const supportsXPU = 
+        name.includes('Arc') || 
+        name.includes('Iris Xe') ||
+        /UHD\s*(7\d{2}|Graphics\s*7)/i.test(name)
+      
+      if (supportsXPU) {
+        const vram = data.AdapterRAM ? Math.round(data.AdapterRAM / (1024 * 1024)) : undefined
+        return {
+          available: true,
+          name: data.Name,
+          vram: vram
+        }
+      }
+    }
+  } catch {
+    // No Intel XPU-compatible GPU found
+  }
+  return { available: false }
+}
+
+// Get all available accelerators
+export async function getAvailableAccelerators(): Promise<AvailableAccelerators> {
+  const [cuda, xpu] = await Promise.all([
+    checkNvidiaGPU(),
+    checkIntelGPU()
+  ])
+  
+  return {
+    cpu: true,
+    cuda,
+    xpu
+  }
+}
+
+// Get accelerator config file path
+function getAcceleratorConfigPath(engine: 'silero' | 'coqui'): string {
+  const basePath = engine === 'silero' ? getSileroPath() : getCoquiPath()
+  return path.join(basePath, 'accelerator.json')
+}
+
+// Read current accelerator config
+export function getCurrentAccelerator(engine: 'silero' | 'coqui'): AcceleratorConfig | null {
+  try {
+    const configPath = getAcceleratorConfigPath(engine)
+    if (existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf-8')
+      return JSON.parse(content) as AcceleratorConfig
+    }
+  } catch {
+    // Config doesn't exist or is invalid
+  }
+  return null
+}
+
+// Save accelerator config
+function saveAcceleratorConfig(engine: 'silero' | 'coqui', accelerator: AcceleratorType, pytorchVersion?: string): void {
+  const config: AcceleratorConfig = {
+    accelerator,
+    installedAt: new Date().toISOString(),
+    pytorchVersion
+  }
+  const configPath = getAcceleratorConfigPath(engine)
+  const dir = path.dirname(configPath)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+}
+
+// Remove Silero installation (for reinstall with different accelerator)
+export async function removeSileroInstallation(): Promise<void> {
+  const sileroPath = getSileroPath()
+  const embeddedPythonPath = getEmbeddedPythonPath()
+  const embeddedSitePackages = path.join(embeddedPythonPath, 'Lib', 'site-packages')
+  
+  // Remove venv if exists
+  const venvPath = path.join(sileroPath, 'venv')
+  if (existsSync(venvPath)) {
+    rmSync(venvPath, { recursive: true, force: true })
+  }
+  
+  // Remove PyTorch packages from embedded Python site-packages
+  if (existsSync(embeddedSitePackages)) {
+    const pytorchPackages = ['torch', 'torchvision', 'torchaudio', 'torch-*', 'intel_extension_for_pytorch']
+    for (const pkg of pytorchPackages) {
+      const entries = fs.readdirSync(embeddedSitePackages)
+      for (const entry of entries) {
+        if (entry.startsWith(pkg.replace('*', '')) || entry.startsWith(pkg.replace('-*', ''))) {
+          const fullPath = path.join(embeddedSitePackages, entry)
+          try {
+            rmSync(fullPath, { recursive: true, force: true })
+          } catch (e) {
+            console.warn(`Failed to remove ${fullPath}:`, e)
+          }
+        }
+      }
+    }
+  }
+  
+  // Remove accelerator config
+  const configPath = getAcceleratorConfigPath('silero')
+  if (existsSync(configPath)) {
+    unlinkSync(configPath)
+  }
+}
+
+// Remove Coqui installation (for reinstall with different accelerator)
+export async function removeCoquiInstallation(): Promise<void> {
+  const coquiPath = getCoquiPath()
+  const embeddedPythonPath = getEmbeddedPythonPath()
+  const embeddedSitePackages = path.join(embeddedPythonPath, 'Lib', 'site-packages')
+  
+  // Remove venv if exists
+  const venvPath = path.join(coquiPath, 'venv')
+  if (existsSync(venvPath)) {
+    rmSync(venvPath, { recursive: true, force: true })
+  }
+  
+  // Remove PyTorch and TTS packages from embedded Python site-packages
+  if (existsSync(embeddedSitePackages)) {
+    const packagesToRemove = [
+      'torch', 'torchvision', 'torchaudio', 'torch-*',
+      'TTS', 'TTS-*',
+      'intel_extension_for_pytorch'
+    ]
+    for (const pkg of packagesToRemove) {
+      const entries = fs.readdirSync(embeddedSitePackages)
+      for (const entry of entries) {
+        if (entry.startsWith(pkg.replace('*', '')) || entry.startsWith(pkg.replace('-*', ''))) {
+          const fullPath = path.join(embeddedSitePackages, entry)
+          try {
+            rmSync(fullPath, { recursive: true, force: true })
+          } catch (e) {
+            console.warn(`Failed to remove ${fullPath}:`, e)
+          }
+        }
+      }
+    }
+  }
+  
+  // Remove accelerator config
+  const configPath = getAcceleratorConfigPath('coqui')
+  if (existsSync(configPath)) {
+    unlinkSync(configPath)
+  }
+}
+
+// PyTorch URLs for different accelerators
+const PYTORCH_INDEX_URLS: Record<AcceleratorType, string> = {
+  cpu: 'https://download.pytorch.org/whl/cpu',
+  cuda: 'https://download.pytorch.org/whl/cu118',
+  xpu: 'https://pytorch-extension.intel.com/release-whl/stable/xpu/us/'
+}
+
+// Reinstall Silero with specified accelerator
+export async function reinstallSileroWithAccelerator(
+  accelerator: AcceleratorType,
+  onProgress: (progress: ReinstallProgress) => void
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Stop TTS server (handled by caller via IPC)
+    onProgress({ stage: 'stopping', message: 'Останавливаем TTS сервер...' })
+    
+    // 2. Remove old installation
+    onProgress({ stage: 'removing', message: 'Удаляем старую установку...' })
+    await removeSileroInstallation()
+    
+    // 3. Reinstall with new accelerator
+    onProgress({ stage: 'installing', message: 'Устанавливаем PyTorch...', progress: 0 })
+    
+    let pythonCmd = await checkPythonAvailable()
+    
+    // Install embedded Python if needed
+    if (!pythonCmd) {
+      const pythonResult = await installEmbeddedPython((p) => {
+        onProgress({
+          stage: 'installing',
+          message: p.details || 'Устанавливаем Python...',
+          progress: Math.round(p.progress * 0.1)
+        })
+      })
+      
+      if (!pythonResult.success) {
+        return { success: false, error: `Не удалось установить Python: ${pythonResult.error}` }
+      }
+      
+      pythonCmd = await checkPythonAvailable()
+      if (!pythonCmd) {
+        return { success: false, error: 'Python недоступен после установки' }
+      }
+    }
+    
+    const sileroPath = getSileroPath()
+    const embeddedPythonExe = getEmbeddedPythonExe()
+    const isUsingEmbedded = pythonCmd === embeddedPythonExe
+    
+    if (!existsSync(sileroPath)) {
+      mkdirSync(sileroPath, { recursive: true })
+    }
+    
+    let targetPython: string
+    const embeddedTargetDir = isUsingEmbedded
+      ? path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages')
+      : undefined
+    
+    if (isUsingEmbedded) {
+      targetPython = embeddedPythonExe
+    } else {
+      const venvPath = path.join(sileroPath, 'venv')
+      const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+      
+      if (!existsSync(venvPython)) {
+        const pythonExecCmd = pythonCmd.includes(' ') ? `"${pythonCmd}"` : pythonCmd
+        await execAsync(`${pythonExecCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+        await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+          timeout: 120000,
+          maxBuffer: 1024 * 1024 * 10
+        })
+      }
+      targetPython = venvPython
+    }
+    
+    // Install PyTorch with specified accelerator
+    const indexUrl = PYTORCH_INDEX_URLS[accelerator]
+    let packages = 'torch torchvision torchaudio'
+    
+    // For Intel XPU, we also need intel-extension-for-pytorch
+    if (accelerator === 'xpu') {
+      packages = 'torch torchvision torchaudio intel-extension-for-pytorch'
+    }
+    
+    onProgress({ stage: 'installing', message: `Устанавливаем PyTorch (${accelerator.toUpperCase()})...`, progress: 15 })
+    
+    const pytorchResult = await runPipWithProgress(
+      targetPython,
+      packages,
+      {
+        indexUrl,
+        timeout: 900000, // 15 minutes for CUDA download
+        targetDir: embeddedTargetDir,
+        onProgress: (info) => {
+          const progress = 15 + Math.round((info.percentage || 0) * 0.5)
+          let message = 'Устанавливаем PyTorch...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            message = `Скачиваем ${info.package}: ${info.percentage}%`
+          }
+          onProgress({ stage: 'installing', message, progress })
+        }
+      }
+    )
+    
+    if (!pytorchResult.success) {
+      return { success: false, error: pytorchResult.error || 'Не удалось установить PyTorch' }
+    }
+    
+    // Install additional dependencies
+    onProgress({ stage: 'installing', message: 'Устанавливаем зависимости...', progress: 70 })
+    
+    const depsResult = await runPipWithProgress(
+      targetPython,
+      'omegaconf numpy scipy flask psutil',
+      {
+        timeout: 180000,
+        targetDir: embeddedTargetDir,
+        onProgress: (info) => {
+          const progress = 70 + Math.round((info.percentage || 0) * 0.15)
+          onProgress({ stage: 'installing', message: 'Устанавливаем зависимости...', progress })
+        }
+      }
+    )
+    
+    if (!depsResult.success) {
+      return { success: false, error: depsResult.error || 'Не удалось установить зависимости' }
+    }
+    
+    // Setup scripts
+    onProgress({ stage: 'installing', message: 'Настраиваем скрипты...', progress: 88 })
+    
+    const generateScript = getGenerateScriptContent()
+    fs.writeFileSync(path.join(sileroPath, 'generate.py'), generateScript, 'utf-8')
+    
+    const ttsServerScript = getTTSServerScriptContent()
+    const ttsResourcesPath = path.dirname(sileroPath)
+    fs.writeFileSync(path.join(ttsResourcesPath, 'tts_server.py'), ttsServerScript, 'utf-8')
+    
+    // Verify installation
+    onProgress({ stage: 'installing', message: 'Проверяем установку...', progress: 94 })
+    
+    let verifyCmd = `"${targetPython}" -c "import torch; print('OK')`
+    if (accelerator === 'cuda') {
+      verifyCmd = `"${targetPython}" -c "import torch; print('CUDA' if torch.cuda.is_available() else 'CPU')"`
+    } else if (accelerator === 'xpu') {
+      verifyCmd = `"${targetPython}" -c "import torch; import intel_extension_for_pytorch as ipex; print('XPU' if hasattr(torch, 'xpu') and torch.xpu.is_available() else 'CPU')"`
+    }
+    
+    const { stdout } = await execAsync(verifyCmd, { timeout: 30000 })
+    
+    // Get PyTorch version
+    let pytorchVersion: string | undefined
+    try {
+      const { stdout: verOut } = await execAsync(`"${targetPython}" -c "import torch; print(torch.__version__)"`, { timeout: 10000 })
+      pytorchVersion = verOut.trim()
+    } catch {}
+    
+    // Save accelerator config
+    saveAcceleratorConfig('silero', accelerator, pytorchVersion)
+    
+    onProgress({ stage: 'complete', message: `Silero переустановлен с ${accelerator.toUpperCase()} ускорением!`, progress: 100 })
+    
+    return { success: true }
+  } catch (error) {
+    onProgress({ stage: 'error', message: (error as Error).message })
+    return { success: false, error: (error as Error).message }
+  }
+}
+
+// Reinstall Coqui with specified accelerator
+export async function reinstallCoquiWithAccelerator(
+  accelerator: AcceleratorType,
+  onProgress: (progress: ReinstallProgress) => void
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Stop TTS server (handled by caller via IPC)
+    onProgress({ stage: 'stopping', message: 'Останавливаем TTS сервер...' })
+    
+    // 2. Check build tools
+    const hasBuildTools = await checkBuildToolsAvailable()
+    if (!hasBuildTools) {
+      return {
+        success: false,
+        error: 'Требуются Visual Studio Build Tools для установки Coqui TTS'
+      }
+    }
+    
+    const vcvarsallPath = await findVcvarsallPath()
+    if (!vcvarsallPath) {
+      return {
+        success: false,
+        error: 'Не найден vcvarsall.bat. Переустановите Visual Studio Build Tools с C++ workload.'
+      }
+    }
+    
+    // 3. Remove old installation
+    onProgress({ stage: 'removing', message: 'Удаляем старую установку...' })
+    await removeCoquiInstallation()
+    
+    // 4. Reinstall with new accelerator
+    onProgress({ stage: 'installing', message: 'Устанавливаем PyTorch...', progress: 0 })
+    
+    let pythonCmd = await checkPythonAvailable()
+    
+    if (!pythonCmd) {
+      const pythonResult = await installEmbeddedPython((p) => {
+        onProgress({
+          stage: 'installing',
+          message: p.details || 'Устанавливаем Python...',
+          progress: Math.round(p.progress * 0.05)
+        })
+      })
+      
+      if (!pythonResult.success) {
+        return { success: false, error: `Не удалось установить Python: ${pythonResult.error}` }
+      }
+      
+      pythonCmd = await checkPythonAvailable()
+      if (!pythonCmd) {
+        return { success: false, error: 'Python недоступен после установки' }
+      }
+    }
+    
+    const coquiPath = getCoquiPath()
+    const embeddedPythonExe = getEmbeddedPythonExe()
+    const isUsingEmbedded = pythonCmd === embeddedPythonExe
+    
+    if (!existsSync(coquiPath)) {
+      mkdirSync(coquiPath, { recursive: true })
+    }
+    
+    const voicesPath = path.join(coquiPath, 'voices')
+    if (!existsSync(voicesPath)) {
+      mkdirSync(voicesPath, { recursive: true })
+    }
+    
+    let targetPython: string
+    const embeddedTargetDir = isUsingEmbedded
+      ? path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages')
+      : undefined
+    
+    if (isUsingEmbedded) {
+      targetPython = embeddedPythonExe
+    } else {
+      const venvPath = path.join(coquiPath, 'venv')
+      const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+      
+      if (!existsSync(venvPython)) {
+        const pythonExecCmd = pythonCmd.includes(' ') ? `"${pythonCmd}"` : pythonCmd
+        await execAsync(`${pythonExecCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+        await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+          timeout: 120000,
+          maxBuffer: 1024 * 1024 * 10
+        })
+      }
+      targetPython = venvPython
+    }
+    
+    // Install PyTorch with specified accelerator
+    const indexUrl = PYTORCH_INDEX_URLS[accelerator]
+    let packages = 'torch torchaudio'
+    
+    if (accelerator === 'xpu') {
+      packages = 'torch torchaudio intel-extension-for-pytorch'
+    }
+    
+    onProgress({ stage: 'installing', message: `Скачиваем PyTorch (${accelerator.toUpperCase()})...`, progress: 8 })
+    
+    const pytorchResult = await runPipWithProgress(
+      targetPython,
+      packages,
+      {
+        indexUrl,
+        timeout: 1200000,
+        targetDir: embeddedTargetDir,
+        onProgress: (info) => {
+          const progress = 8 + Math.round((info.percentage || 0) * 0.30)
+          let message = 'Устанавливаем PyTorch...'
+          if (info.phase === 'downloading' && info.percentage !== undefined) {
+            if (info.downloaded !== undefined && info.total !== undefined) {
+              message = `Скачиваем ${info.package}: ${info.downloaded.toFixed(1)}/${info.total.toFixed(1)} MB`
+            } else {
+              message = `Скачиваем ${info.package}: ${info.percentage}%`
+            }
+          }
+          onProgress({ stage: 'installing', message, progress })
+        }
+      }
+    )
+    
+    if (!pytorchResult.success) {
+      return { success: false, error: pytorchResult.error || 'Не удалось установить PyTorch' }
+    }
+    
+    // Install numpy, scipy, omegaconf
+    onProgress({ stage: 'installing', message: 'Устанавливаем зависимости...', progress: 40 })
+    
+    const depsResult = await runPipWithProgress(
+      targetPython,
+      'numpy scipy omegaconf',
+      {
+        timeout: 300000,
+        extraArgs: ['--prefer-binary'],
+        targetDir: embeddedTargetDir,
+        onProgress: (info) => {
+          const progress = 40 + Math.round((info.percentage || 0) * 0.08)
+          onProgress({ stage: 'installing', message: 'Устанавливаем зависимости...', progress })
+        }
+      }
+    )
+    
+    if (!depsResult.success) {
+      return { success: false, error: depsResult.error || 'Не удалось установить зависимости' }
+    }
+    
+    // Install Coqui TTS
+    onProgress({ stage: 'installing', message: 'Устанавливаем Coqui TTS...', progress: 50 })
+    
+    const ttsResult = await runPipWithProgress(
+      targetPython,
+      'TTS flask psutil',
+      {
+        timeout: 1200000,
+        msvcEnvPath: vcvarsallPath,
+        targetDir: embeddedTargetDir,
+        onProgress: (info) => {
+          const progress = 50 + Math.round((info.percentage || 0) * 0.25)
+          let message = 'Устанавливаем Coqui TTS...'
+          if (info.phase === 'downloading') {
+            message = `Скачиваем ${info.package}...`
+          } else if (info.phase === 'processing') {
+            message = `Компилируем ${info.package}...`
+          }
+          onProgress({ stage: 'installing', message, progress })
+        }
+      }
+    )
+    
+    if (!ttsResult.success) {
+      return { success: false, error: ttsResult.error || 'Не удалось установить Coqui TTS' }
+    }
+    
+    // Fix transformers compatibility
+    onProgress({ stage: 'installing', message: 'Исправляем совместимость transformers...', progress: 78 })
+    
+    const transformersCmd = embeddedTargetDir
+      ? `"${targetPython}" -m pip install "transformers>=4.33.0,<4.40.0" --target "${embeddedTargetDir}" --no-input`
+      : `"${targetPython}" -m pip install "transformers>=4.33.0,<4.40.0" --no-input`
+    
+    await execAsync(transformersCmd, {
+      timeout: 180000,
+      maxBuffer: 1024 * 1024 * 10
+    })
+    
+    // Setup generation script
+    onProgress({ stage: 'installing', message: 'Настраиваем скрипты...', progress: 80 })
+    
+    const generateScript = getCoquiGenerateScriptContent()
+    fs.writeFileSync(path.join(coquiPath, 'generate.py'), generateScript, 'utf-8')
+    
+    // Verify installation
+    onProgress({ stage: 'installing', message: 'Проверяем установку...', progress: 82 })
+    
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    let verifySuccess = false
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { stdout } = await execAsync(`"${targetPython}" -c "from TTS.api import TTS; print('OK')"`, { timeout: 60000 })
+        if (stdout.includes('OK')) {
+          verifySuccess = true
+          break
+        }
+      } catch (err) {
+        console.log(`[reinstallCoqui] Verification attempt ${attempt} failed`)
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        }
+      }
+    }
+    
+    if (!verifySuccess) {
+      return { success: false, error: 'Проверка установки Coqui TTS не удалась' }
+    }
+    
+    // Download XTTS-v2 model
+    onProgress({ stage: 'installing', message: 'Скачиваем модель XTTS-v2 (~1.8GB)...', progress: 85 })
+    
+    const preloadScript = `import os
+import sys
+os.environ["COQUI_TOS_AGREED"] = "1"
+
+import torch
+_orig_load = torch.load
+def _patched_load(*a, **kw):
+    if 'weights_only' not in kw:
+        kw['weights_only'] = False
+    return _orig_load(*a, **kw)
+torch.load = _patched_load
+
+from TTS.api import TTS
+tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+print("Model downloaded successfully")
+`
+    const preloadScriptPath = path.join(coquiPath, 'preload_model.py')
+    fs.writeFileSync(preloadScriptPath, preloadScript, 'utf-8')
+    
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(targetPython, [preloadScriptPath], {
+          shell: true,
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        })
+        
+        let stderr = ''
+        
+        proc.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString()
+          const progressMatch = data.toString().match(/(\d+)%\|/)
+          if (progressMatch) {
+            const modelPercent = parseInt(progressMatch[1], 10)
+            const progress = 85 + Math.round(modelPercent * 0.13)
+            onProgress({
+              stage: 'installing',
+              message: `Скачиваем модель XTTS-v2: ${modelPercent}%`,
+              progress
+            })
+          }
+        })
+        
+        const timeout = setTimeout(() => {
+          proc.kill()
+          reject(new Error('Таймаут скачивания модели'))
+        }, 1800000)
+        
+        proc.on('close', (code) => {
+          clearTimeout(timeout)
+          if (code === 0) {
+            resolve()
+          } else {
+            reject(new Error(stderr || `Скачивание модели завершилось с кодом ${code}`))
+          }
+        })
+        
+        proc.on('error', (err) => {
+          clearTimeout(timeout)
+          reject(err)
+        })
+      })
+    } finally {
+      try { unlinkSync(preloadScriptPath) } catch {}
+    }
+    
+    // Get PyTorch version
+    let pytorchVersion: string | undefined
+    try {
+      const { stdout: verOut } = await execAsync(`"${targetPython}" -c "import torch; print(torch.__version__)"`, { timeout: 10000 })
+      pytorchVersion = verOut.trim()
+    } catch {}
+    
+    // Save accelerator config
+    saveAcceleratorConfig('coqui', accelerator, pytorchVersion)
+    
+    onProgress({ stage: 'complete', message: `Coqui переустановлен с ${accelerator.toUpperCase()} ускорением!`, progress: 100 })
+    
+    return { success: true }
+  } catch (error) {
+    onProgress({ stage: 'error', message: (error as Error).message })
     return { success: false, error: (error as Error).message }
   }
 }

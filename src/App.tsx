@@ -220,6 +220,20 @@ function App() {
   const [coquiInstallProgress, setCoquiInstallProgress] = useState('')
   const [coquiInstallPercent, setCoquiInstallPercent] = useState(0)
 
+  // GPU Accelerator state
+  const [availableAccelerators, setAvailableAccelerators] = useState<{
+    cpu: true
+    cuda: { available: boolean; name?: string; vram?: number }
+    xpu: { available: boolean; name?: string; vram?: number }
+  } | null>(null)
+  const [sileroAccelerator, setSileroAccelerator] = useState<{ accelerator: 'cpu' | 'cuda' | 'xpu'; installedAt: string; pytorchVersion?: string } | null>(null)
+  const [coquiAccelerator, setCoquiAccelerator] = useState<{ accelerator: 'cpu' | 'cuda' | 'xpu'; installedAt: string; pytorchVersion?: string } | null>(null)
+  const [isReinstalling, setIsReinstalling] = useState<'silero' | 'coqui' | null>(null)
+  const [reinstallProgress, setReinstallProgress] = useState<{ stage: string; message: string; progress?: number } | null>(null)
+  const [showReinstallConfirm, setShowReinstallConfirm] = useState<{ engine: 'silero' | 'coqui'; accelerator: 'cuda' | 'xpu' } | null>(null)
+  const [sileroInstallAccelerator, setSileroInstallAccelerator] = useState<'cpu' | 'cuda' | 'xpu'>('cpu')
+  const [coquiInstallAccelerator, setCoquiInstallAccelerator] = useState<'cpu' | 'cuda' | 'xpu'>('cpu')
+
   // TTS Server state
   const [ttsServerStatus, setTtsServerStatus] = useState<{
     running: boolean
@@ -295,6 +309,19 @@ function App() {
         setPiperInstalled(deps.piper)
         setFfmpegInstalled(deps.ffmpeg)
         setRhvoiceCoreInstalled(deps.rhvoiceCore)
+
+        // Load GPU accelerator info
+        const accelerators = await window.electronAPI.getAvailableAccelerators()
+        setAvailableAccelerators(accelerators)
+
+        if (deps.silero) {
+          const sileroAcc = await window.electronAPI.getCurrentSileroAccelerator()
+          setSileroAccelerator(sileroAcc)
+        }
+        if (deps.coqui) {
+          const coquiAcc = await window.electronAPI.getCurrentCoquiAccelerator()
+          setCoquiAccelerator(coquiAcc)
+        }
       } catch (err) {
         console.error('Failed to check provider status:', err)
       }
@@ -779,6 +806,50 @@ function App() {
     }
   }, [selectedProvider, sileroInstalled, coquiInstalled])
 
+  // Handle reinstall with accelerator
+  const handleReinstallWithAccelerator = async (engine: 'silero' | 'coqui', accelerator: 'cuda' | 'xpu') => {
+    if (!window.electronAPI) return
+
+    setShowReinstallConfirm(null)
+    setIsReinstalling(engine)
+    setReinstallProgress({ stage: 'stopping', message: 'Останавливаем TTS сервер...' })
+
+    const unsubscribe = window.electronAPI.onReinstallProgress((progress) => {
+      setReinstallProgress(progress)
+    })
+
+    try {
+      const result = engine === 'silero'
+        ? await window.electronAPI.reinstallSileroWithAccelerator(accelerator)
+        : await window.electronAPI.reinstallCoquiWithAccelerator(accelerator)
+
+      if (result.success) {
+        // Refresh accelerator info
+        const newAcc = engine === 'silero'
+          ? await window.electronAPI.getCurrentSileroAccelerator()
+          : await window.electronAPI.getCurrentCoquiAccelerator()
+
+        if (engine === 'silero') {
+          setSileroAccelerator(newAcc)
+        } else {
+          setCoquiAccelerator(newAcc)
+        }
+
+        // Restart TTS server
+        await window.electronAPI.ttsServerStart()
+        await refreshServerStatus()
+      } else {
+        setError(result.error || 'Reinstallation failed')
+      }
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setIsReinstalling(null)
+      setReinstallProgress(null)
+      unsubscribe()
+    }
+  }
+
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -1086,25 +1157,7 @@ function App() {
                     <Sparkles className="h-4 w-4 text-primary" />
                     <span className="font-medium text-sm">Silero Setup Required</span>
                   </div>
-                  {!pythonAvailable ? (
-                    <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">
-                        Silero requires Python 3.9+ to be installed on your system.
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Download Python from{' '}
-                        <a
-                          href="https://www.python.org/downloads/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline hover:text-foreground"
-                        >
-                          python.org
-                        </a>
-                        {' '}and restart the application.
-                      </p>
-                    </div>
-                  ) : isInstallingSilero ? (
+                  {isInstallingSilero ? (
                     <div className="space-y-3">
                       <div className="space-y-1.5">
                         <div className="flex justify-between text-xs">
@@ -1127,11 +1180,67 @@ function App() {
                       <div className="text-sm text-muted-foreground space-y-2">
                         <p>For Silero to work, the following will be installed:</p>
                         <ul className="list-disc list-inside text-xs space-y-0.5 ml-1">
-                          <li>Python virtual environment</li>
-                          <li>PyTorch CPU — ~150 MB</li>
+                          {!pythonAvailable && <li>Python 3.11 (embedded) — ~25 MB</li>}
+                          <li>PyTorch {sileroInstallAccelerator === 'cuda' ? 'CUDA' : sileroInstallAccelerator === 'xpu' ? 'Intel XPU' : 'CPU'} — ~{sileroInstallAccelerator === 'cuda' ? '2.3 GB' : sileroInstallAccelerator === 'xpu' ? '500 MB' : '150 MB'}</li>
                           <li>Dependencies (numpy, omegaconf) — ~5 MB</li>
                         </ul>
                       </div>
+
+                      {/* GPU Accelerator Selection */}
+                      {availableAccelerators && (availableAccelerators.cuda.available || availableAccelerators.xpu.available) && (
+                        <div className="p-3 rounded-md border border-primary/30 bg-primary/5 space-y-2">
+                          <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                            <Zap className="h-4 w-4" />
+                            <span>GPU ускорение доступно!</span>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                              <input
+                                type="radio"
+                                name="sileroAccelerator"
+                                checked={sileroInstallAccelerator === 'cpu'}
+                                onChange={() => setSileroInstallAccelerator('cpu')}
+                                className="text-primary"
+                              />
+                              <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>CPU (~150 MB) — работает на любом компьютере</span>
+                            </label>
+                            {availableAccelerators.cuda.available && (
+                              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="sileroAccelerator"
+                                  checked={sileroInstallAccelerator === 'cuda'}
+                                  onChange={() => setSileroInstallAccelerator('cuda')}
+                                  className="text-primary"
+                                />
+                                <Zap className="h-3.5 w-3.5 text-green-500" />
+                                <span>CUDA (~2.3 GB) — в 5-10x быстрее</span>
+                                {availableAccelerators.cuda.name && (
+                                  <span className="text-muted-foreground">({availableAccelerators.cuda.name})</span>
+                                )}
+                              </label>
+                            )}
+                            {availableAccelerators.xpu.available && (
+                              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="sileroAccelerator"
+                                  checked={sileroInstallAccelerator === 'xpu'}
+                                  onChange={() => setSileroInstallAccelerator('xpu')}
+                                  className="text-primary"
+                                />
+                                <Zap className="h-3.5 w-3.5 text-blue-500" />
+                                <span>Intel XPU (~550 MB) — в 3-5x быстрее</span>
+                                {availableAccelerators.xpu.name && (
+                                  <span className="text-muted-foreground">({availableAccelerators.xpu.name})</span>
+                                )}
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded space-y-1">
                         <div className="flex items-center gap-2">
                           <Sparkles className="h-3.5 w-3.5 text-primary flex-shrink-0" />
@@ -1144,7 +1253,7 @@ function App() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-muted-foreground">
-                          Initial download: ~155 MB
+                          Initial download: ~{sileroInstallAccelerator === 'cuda' ? '2.5 GB' : sileroInstallAccelerator === 'xpu' ? '600 MB' : '155 MB'}
                         </span>
                         <Button
                           variant="default"
@@ -1161,11 +1270,14 @@ function App() {
                             })
 
                             try {
-                              const result = await window.electronAPI.installSilero()
+                              const result = await window.electronAPI.installSilero(sileroInstallAccelerator)
                               if (result.success) {
                                 setSileroInstalled(true)
                                 setSileroInstallProgress('')
                                 setSileroInstallPercent(0)
+                                // Refresh accelerator info
+                                const acc = await window.electronAPI.getCurrentSileroAccelerator()
+                                setSileroAccelerator(acc)
                               } else {
                                 setError(result.error || 'Silero installation failed')
                               }
@@ -1193,25 +1305,7 @@ function App() {
                     <Wand2 className="h-4 w-4 text-primary" />
                     <span className="font-medium text-sm">Coqui XTTS-v2 Setup Required</span>
                   </div>
-                  {!pythonAvailable ? (
-                    <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">
-                        Coqui requires Python 3.9+ to be installed on your system.
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Download Python from{' '}
-                        <a
-                          href="https://www.python.org/downloads/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline hover:text-foreground"
-                        >
-                          python.org
-                        </a>
-                        {' '}and restart the application.
-                      </p>
-                    </div>
-                  ) : isInstallingCoqui ? (
+                  {isInstallingCoqui ? (
                     <div className="space-y-3">
                       <div className="space-y-1.5">
                         <div className="flex justify-between text-xs">
@@ -1237,14 +1331,76 @@ function App() {
                           {!coquiBuildToolsAvailable && (
                             <li className="text-yellow-500">Visual Studio Build Tools — ~7 GB (required for compilation)</li>
                           )}
-                          <li>Python virtual environment</li>
+                          {!pythonAvailable && <li>Python 3.11 (embedded) — ~25 MB</li>}
+                          <li>PyTorch {coquiInstallAccelerator === 'cuda' ? 'CUDA' : coquiInstallAccelerator === 'xpu' ? 'Intel XPU' : 'CPU'} — ~{coquiInstallAccelerator === 'cuda' ? '2.3 GB' : coquiInstallAccelerator === 'xpu' ? '500 MB' : '200 MB'}</li>
                           <li>Coqui TTS library — ~500 MB</li>
                           <li>XTTS-v2 model — ~1.8 GB</li>
                         </ul>
                       </div>
+
+                      {/* GPU Accelerator Selection */}
+                      {availableAccelerators && (availableAccelerators.cuda.available || availableAccelerators.xpu.available) && (
+                        <div className="p-3 rounded-md border border-primary/30 bg-primary/5 space-y-2">
+                          <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                            <Zap className="h-4 w-4" />
+                            <span>GPU ускорение доступно!</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">XTTS-v2 значительно выигрывает от GPU (в 10-20x быстрее)</p>
+                          <div className="space-y-1.5">
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                              <input
+                                type="radio"
+                                name="coquiAccelerator"
+                                checked={coquiInstallAccelerator === 'cpu'}
+                                onChange={() => setCoquiInstallAccelerator('cpu')}
+                                className="text-primary"
+                              />
+                              <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>CPU (~200 MB) — медленная генерация</span>
+                            </label>
+                            {availableAccelerators.cuda.available && (
+                              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="coquiAccelerator"
+                                  checked={coquiInstallAccelerator === 'cuda'}
+                                  onChange={() => setCoquiInstallAccelerator('cuda')}
+                                  className="text-primary"
+                                />
+                                <Zap className="h-3.5 w-3.5 text-green-500" />
+                                <span>CUDA (~2.3 GB) — рекомендуется</span>
+                                {availableAccelerators.cuda.name && (
+                                  <span className="text-muted-foreground">({availableAccelerators.cuda.name})</span>
+                                )}
+                              </label>
+                            )}
+                            {availableAccelerators.xpu.available && (
+                              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="coquiAccelerator"
+                                  checked={coquiInstallAccelerator === 'xpu'}
+                                  onChange={() => setCoquiInstallAccelerator('xpu')}
+                                  className="text-primary"
+                                />
+                                <Zap className="h-3.5 w-3.5 text-blue-500" />
+                                <span>Intel XPU (~550 MB)</span>
+                                {availableAccelerators.xpu.name && (
+                                  <span className="text-muted-foreground">({availableAccelerators.xpu.name})</span>
+                                )}
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-muted-foreground">
-                          Total download: ~{coquiBuildToolsAvailable ? '2.5' : '9.5'} GB
+                          Total download: ~{(() => {
+                            let size = coquiInstallAccelerator === 'cuda' ? 4.6 : coquiInstallAccelerator === 'xpu' ? 2.8 : 2.5
+                            if (!coquiBuildToolsAvailable) size += 7
+                            return size.toFixed(1)
+                          })()} GB
                           {!coquiBuildToolsAvailable && ' (includes Build Tools)'}
                         </span>
                         <Button
@@ -1262,7 +1418,7 @@ function App() {
                             })
 
                             try {
-                              let result = await window.electronAPI.installCoqui()
+                              let result = await window.electronAPI.installCoqui(coquiInstallAccelerator)
 
                               // If Build Tools are needed, install them first
                               if (result.needsBuildTools) {
@@ -1284,13 +1440,16 @@ function App() {
                                 // Try installing Coqui again after Build Tools are installed
                                 setCoquiInstallProgress('Retrying Coqui installation...')
                                 setCoquiInstallPercent(0)
-                                result = await window.electronAPI.installCoqui()
+                                result = await window.electronAPI.installCoqui(coquiInstallAccelerator)
                               }
 
                               if (result.success) {
                                 setCoquiInstalled(true)
                                 setCoquiInstallProgress('')
                                 setCoquiInstallPercent(0)
+                                // Refresh accelerator info
+                                const acc = await window.electronAPI.getCurrentCoquiAccelerator()
+                                setCoquiAccelerator(acc)
                               } else {
                                 setError(result.error || 'Coqui installation failed')
                               }
@@ -1329,95 +1488,56 @@ function App() {
                           <div className="font-medium text-sm">Silero TTS</div>
                           <span className="text-xs text-muted-foreground">Neural voices</span>
                         </div>
-                        {/* Device selector dropdown */}
-                        <div className="relative">
-                          {(() => {
-                            const anyModelLoaded = ttsServerStatus?.silero.ru_loaded ||
-                              ttsServerStatus?.silero.en_loaded ||
-                              ttsServerStatus?.coqui.loaded
-                            const isLocked = anyModelLoaded || isLoadingModel !== null
-                            const displayDevice = preferredDevice
-
-                            return (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    if (!isLocked) setDeviceSelectOpen(!deviceSelectOpen)
-                                  }}
-                                  disabled={isLocked}
-                                  title={isLocked ? 'Unload models to change device' : 'Select compute device'}
-                                  className={`
-                                    flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-all
-                                    ${displayDevice === 'cuda'
-                                      ? 'bg-green-500/20 text-green-600 dark:text-green-400' + (!isLocked ? ' hover:bg-green-500/30' : '')
-                                      : displayDevice === 'xpu'
-                                        ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' + (!isLocked ? ' hover:bg-blue-500/30' : '')
-                                        : 'bg-muted/50 text-muted-foreground' + (!isLocked ? ' hover:bg-muted' : '')
-                                    }
-                                    ${isLocked ? 'opacity-70 cursor-default' : 'cursor-pointer'}
-                                    focus:outline-none
-                                  `}
-                                >
-                                  <Cpu className="h-3 w-3" />
-                                  {displayDevice.toUpperCase()}
-                                  {!isLocked && <ChevronDown className={`h-3 w-3 transition-transform ${deviceSelectOpen ? 'rotate-180' : ''}`} />}
-                                </button>
-                                {deviceSelectOpen && !isLocked && (
-                                  <>
-                                    <div
-                                      className="fixed inset-0 z-10"
-                                      onClick={() => setDeviceSelectOpen(false)}
-                                    />
-                                    <div className="absolute right-0 top-full mt-1 z-20 bg-popover border rounded-lg shadow-lg py-1 min-w-[160px]">
-                                      {availableDevices.map((dev) => {
-                                        const isSelected = dev.id === preferredDevice
-                                        const isAvailable = dev.available
-
-                                        return (
-                                          <button
-                                            key={dev.id}
-                                            onClick={() => {
-                                              if (isAvailable) {
-                                                handleDeviceChange(dev.id)
-                                                setDeviceSelectOpen(false)
-                                              }
-                                            }}
-                                            disabled={!isAvailable}
-                                            className={`
-                                              w-full px-3 py-1.5 text-left text-xs
-                                              ${isSelected
-                                                ? 'bg-accent text-accent-foreground'
-                                                : isAvailable
-                                                  ? 'hover:bg-accent/50'
-                                                  : ''
-                                              }
-                                              ${!isAvailable ? 'text-muted-foreground/50 cursor-not-allowed' : ''}
-                                              focus:outline-none
-                                            `}
-                                          >
-                                            <div className="flex items-center justify-between gap-2">
-                                              <span className="flex items-center gap-2">
-                                                <Cpu className="h-3 w-3" />
-                                                {dev.name}
-                                              </span>
-                                              {isSelected && <Check className="h-3 w-3" />}
-                                            </div>
-                                            {!isAvailable && (
-                                              <div className="text-[10px] text-muted-foreground/40 ml-5">
-                                                not detected
-                                              </div>
-                                            )}
-                                          </button>
-                                        )
-                                      })}
-                                    </div>
-                                  </>
-                                )}
-                              </>
-                            )
-                          })()}
+                        {/* Current accelerator badge */}
+                        <div className={`
+                          flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded
+                          ${sileroAccelerator?.accelerator === 'cuda'
+                            ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                            : sileroAccelerator?.accelerator === 'xpu'
+                              ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
+                              : 'bg-muted/50 text-muted-foreground'
+                          }
+                        `}>
+                          <Cpu className="h-3 w-3" />
+                          {(sileroAccelerator?.accelerator || 'cpu').toUpperCase()}
                         </div>
                       </div>
+
+                      {/* GPU Upgrade Banner */}
+                      {(sileroAccelerator?.accelerator === 'cpu' || !sileroAccelerator) &&
+                       (availableAccelerators?.cuda.available || availableAccelerators?.xpu.available) && (
+                        <div className="mb-3 p-2.5 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
+                          <div className="flex items-start gap-2">
+                            <Zap className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium text-yellow-700 dark:text-yellow-400">
+                                GPU ускорение доступно!
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-0.5">
+                                {availableAccelerators?.cuda.available
+                                  ? `${availableAccelerators.cuda.name}${availableAccelerators.cuda.vram ? ` (${Math.round(availableAccelerators.cuda.vram / 1024)} GB)` : ''}`
+                                  : availableAccelerators?.xpu.name
+                                }
+                              </div>
+                              <div className="text-[10px] text-muted-foreground mt-1">
+                                Генерация в 5-10 раз быстрее. Потребуется переустановка (~2.5 GB).
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 h-7 text-xs"
+                                onClick={() => setShowReinstallConfirm({
+                                  engine: 'silero',
+                                  accelerator: availableAccelerators?.cuda.available ? 'cuda' : 'xpu'
+                                })}
+                              >
+                                <Download className="h-3 w-3 mr-1.5" />
+                                Переустановить с {availableAccelerators?.cuda.available ? 'CUDA' : 'XPU'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Language chips */}
                       <div className="flex flex-wrap gap-2">
@@ -1490,95 +1610,56 @@ function App() {
                           <div className="font-medium text-sm">Coqui XTTS-v2</div>
                           <span className="text-xs text-muted-foreground">Multilingual neural voices</span>
                         </div>
-                        {/* Device selector dropdown */}
-                        <div className="relative">
-                          {(() => {
-                            const anyModelLoaded = ttsServerStatus?.silero.ru_loaded ||
-                              ttsServerStatus?.silero.en_loaded ||
-                              ttsServerStatus?.coqui.loaded
-                            const isLocked = anyModelLoaded || isLoadingModel !== null
-                            const displayDevice = preferredDevice
-
-                            return (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    if (!isLocked) setDeviceSelectOpen(!deviceSelectOpen)
-                                  }}
-                                  disabled={isLocked}
-                                  title={isLocked ? 'Unload models to change device' : 'Select compute device'}
-                                  className={`
-                                    flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-all
-                                    ${displayDevice === 'cuda'
-                                      ? 'bg-green-500/20 text-green-600 dark:text-green-400' + (!isLocked ? ' hover:bg-green-500/30' : '')
-                                      : displayDevice === 'xpu'
-                                        ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' + (!isLocked ? ' hover:bg-blue-500/30' : '')
-                                        : 'bg-muted/50 text-muted-foreground' + (!isLocked ? ' hover:bg-muted' : '')
-                                    }
-                                    ${isLocked ? 'opacity-70 cursor-default' : 'cursor-pointer'}
-                                    focus:outline-none
-                                  `}
-                                >
-                                  <Cpu className="h-3 w-3" />
-                                  {displayDevice.toUpperCase()}
-                                  {!isLocked && <ChevronDown className={`h-3 w-3 transition-transform ${deviceSelectOpen ? 'rotate-180' : ''}`} />}
-                                </button>
-                                {deviceSelectOpen && !isLocked && (
-                                  <>
-                                    <div
-                                      className="fixed inset-0 z-10"
-                                      onClick={() => setDeviceSelectOpen(false)}
-                                    />
-                                    <div className="absolute right-0 top-full mt-1 z-20 bg-popover border rounded-lg shadow-lg py-1 min-w-[160px]">
-                                      {availableDevices.map((dev) => {
-                                        const isSelected = dev.id === preferredDevice
-                                        const isAvailable = dev.available
-
-                                        return (
-                                          <button
-                                            key={dev.id}
-                                            onClick={() => {
-                                              if (isAvailable) {
-                                                handleDeviceChange(dev.id)
-                                                setDeviceSelectOpen(false)
-                                              }
-                                            }}
-                                            disabled={!isAvailable}
-                                            className={`
-                                              w-full px-3 py-1.5 text-left text-xs
-                                              ${isSelected
-                                                ? 'bg-accent text-accent-foreground'
-                                                : isAvailable
-                                                  ? 'hover:bg-accent/50'
-                                                  : ''
-                                              }
-                                              ${!isAvailable ? 'text-muted-foreground/50 cursor-not-allowed' : ''}
-                                              focus:outline-none
-                                            `}
-                                          >
-                                            <div className="flex items-center justify-between gap-2">
-                                              <span className="flex items-center gap-2">
-                                                <Cpu className="h-3 w-3" />
-                                                {dev.name}
-                                              </span>
-                                              {isSelected && <Check className="h-3 w-3" />}
-                                            </div>
-                                            {!isAvailable && (
-                                              <div className="text-[10px] text-muted-foreground/40 ml-5">
-                                                not detected
-                                              </div>
-                                            )}
-                                          </button>
-                                        )
-                                      })}
-                                    </div>
-                                  </>
-                                )}
-                              </>
-                            )
-                          })()}
+                        {/* Current accelerator badge */}
+                        <div className={`
+                          flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded
+                          ${coquiAccelerator?.accelerator === 'cuda'
+                            ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                            : coquiAccelerator?.accelerator === 'xpu'
+                              ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
+                              : 'bg-muted/50 text-muted-foreground'
+                          }
+                        `}>
+                          <Cpu className="h-3 w-3" />
+                          {(coquiAccelerator?.accelerator || 'cpu').toUpperCase()}
                         </div>
                       </div>
+
+                      {/* GPU Upgrade Banner */}
+                      {(coquiAccelerator?.accelerator === 'cpu' || !coquiAccelerator) &&
+                       (availableAccelerators?.cuda.available || availableAccelerators?.xpu.available) && (
+                        <div className="mb-3 p-2.5 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
+                          <div className="flex items-start gap-2">
+                            <Zap className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium text-yellow-700 dark:text-yellow-400">
+                                GPU ускорение доступно!
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-0.5">
+                                {availableAccelerators?.cuda.available
+                                  ? `${availableAccelerators.cuda.name}${availableAccelerators.cuda.vram ? ` (${Math.round(availableAccelerators.cuda.vram / 1024)} GB)` : ''}`
+                                  : availableAccelerators?.xpu.name
+                                }
+                              </div>
+                              <div className="text-[10px] text-muted-foreground mt-1">
+                                XTTS-v2 на GPU работает в 10-20 раз быстрее. Потребуется переустановка (~4.5 GB).
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 h-7 text-xs"
+                                onClick={() => setShowReinstallConfirm({
+                                  engine: 'coqui',
+                                  accelerator: availableAccelerators?.cuda.available ? 'cuda' : 'xpu'
+                                })}
+                              >
+                                <Download className="h-3 w-3 mr-1.5" />
+                                Переустановить с {availableAccelerators?.cuda.available ? 'CUDA' : 'XPU'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Model chip */}
                       <div className="flex flex-wrap gap-2">
@@ -2391,6 +2472,124 @@ function App() {
           </Card>
         )}
       </div>
+
+      {/* Reinstall Confirmation Dialog */}
+      {showReinstallConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <Card className="w-full max-w-md mx-4 shadow-lg">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Zap className="h-5 w-5 text-primary" />
+                Переустановка с {showReinstallConfirm.accelerator === 'cuda' ? 'CUDA' : 'Intel XPU'}
+              </CardTitle>
+              <CardDescription>
+                {showReinstallConfirm.engine === 'silero' ? 'Silero TTS' : 'Coqui XTTS-v2'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p>Для использования GPU ускорения необходимо переустановить {showReinstallConfirm.engine === 'silero' ? 'Silero' : 'Coqui'} с поддержкой {showReinstallConfirm.accelerator === 'cuda' ? 'CUDA' : 'Intel XPU'}.</p>
+                <div className="flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs">
+                    <p className="font-medium">Внимание</p>
+                    <p className="mt-0.5">Потребуется скачать ~{showReinstallConfirm.accelerator === 'cuda' ? '2.5 GB' : '550 MB'}. Не закрывайте приложение во время установки.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowReinstallConfirm(null)}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  className="flex-1 gap-2"
+                  onClick={() => {
+                    handleReinstallWithAccelerator(showReinstallConfirm.engine, showReinstallConfirm.accelerator)
+                    setShowReinstallConfirm(null)
+                  }}
+                >
+                  <Zap className="h-4 w-4" />
+                  Переустановить
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Reinstall Progress Overlay */}
+      {isReinstalling && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm">
+          <Card className="w-full max-w-md mx-4 shadow-lg">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                Переустановка {isReinstalling === 'silero' ? 'Silero' : 'Coqui'}
+              </CardTitle>
+              <CardDescription>
+                Пожалуйста, не закрывайте приложение
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {reinstallProgress && (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-foreground font-medium">
+                        {reinstallProgress.stage === 'stopping' && 'Останавливаем TTS сервер...'}
+                        {reinstallProgress.stage === 'removing' && 'Удаляем старую установку...'}
+                        {reinstallProgress.stage === 'installing' && 'Устанавливаем...'}
+                        {reinstallProgress.stage === 'starting' && 'Запускаем TTS сервер...'}
+                        {reinstallProgress.stage === 'complete' && 'Готово!'}
+                        {reinstallProgress.stage === 'error' && 'Ошибка'}
+                      </span>
+                      {reinstallProgress.progress !== undefined && (
+                        <span className="text-muted-foreground">{reinstallProgress.progress}%</span>
+                      )}
+                    </div>
+                    {reinstallProgress.progress !== undefined && (
+                      <Progress value={reinstallProgress.progress} className="h-2" />
+                    )}
+                    <p className="text-xs text-muted-foreground">{reinstallProgress.message}</p>
+                  </div>
+                  {reinstallProgress.stage === 'error' && (
+                    <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30 text-destructive">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                      <div className="text-xs">
+                        <p className="font-medium">Ошибка переустановки</p>
+                        <p className="mt-0.5">{reinstallProgress.message}</p>
+                      </div>
+                    </div>
+                  )}
+                  {reinstallProgress.stage === 'complete' && (
+                    <div className="flex items-center gap-2 p-3 rounded-md bg-primary/10 border border-primary/30 text-primary">
+                      <CheckCircle className="h-4 w-4 flex-shrink-0" />
+                      <p className="text-xs font-medium">Переустановка завершена успешно!</p>
+                    </div>
+                  )}
+                  {(reinstallProgress.stage === 'complete' || reinstallProgress.stage === 'error') && (
+                    <Button
+                      className="w-full"
+                      onClick={() => {
+                        setIsReinstalling(null)
+                        setReinstallProgress(null)
+                        // Refresh dependency status
+                        checkProviders()
+                      }}
+                    >
+                      Закрыть
+                    </Button>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
     </div>
   )

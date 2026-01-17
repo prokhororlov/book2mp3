@@ -69,6 +69,33 @@ export interface RHVoiceUrls {
   }
 }
 
+// GPU Accelerator types
+export interface GPUInfo {
+  available: boolean
+  name?: string
+  vram?: number  // in MB
+}
+
+export interface AvailableAccelerators {
+  cpu: true
+  cuda: GPUInfo
+  xpu: GPUInfo
+}
+
+export type AcceleratorType = 'cpu' | 'cuda' | 'xpu'
+
+export interface AcceleratorConfig {
+  accelerator: AcceleratorType
+  installedAt: string
+  pytorchVersion?: string
+}
+
+export interface ReinstallProgress {
+  stage: 'stopping' | 'removing' | 'installing' | 'starting' | 'complete' | 'error'
+  message: string
+  progress?: number
+}
+
 
 const electronAPI = {
   openFileDialog: (): Promise<string | null> =>
@@ -132,11 +159,11 @@ const electronAPI = {
   getPythonInfo: (): Promise<{ available: boolean; path: string | null; isEmbedded: boolean; version: string | null }> =>
     ipcRenderer.invoke('get-python-info'),
 
-  installSilero: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-silero'),
+  installSilero: (accelerator: AcceleratorType = 'cpu'): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-silero', accelerator),
 
-  installCoqui: (): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> =>
-    ipcRenderer.invoke('install-coqui'),
+  installCoqui: (accelerator: AcceleratorType = 'cpu'): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> =>
+    ipcRenderer.invoke('install-coqui', accelerator),
 
   checkBuildTools: (): Promise<boolean> =>
     ipcRenderer.invoke('check-build-tools'),
@@ -149,6 +176,28 @@ const electronAPI = {
 
   installFfmpeg: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('install-ffmpeg'),
+
+  // GPU Accelerator management
+  getAvailableAccelerators: (): Promise<AvailableAccelerators> =>
+    ipcRenderer.invoke('get-available-accelerators'),
+
+  getCurrentSileroAccelerator: (): Promise<AcceleratorConfig | null> =>
+    ipcRenderer.invoke('get-current-silero-accelerator'),
+
+  getCurrentCoquiAccelerator: (): Promise<AcceleratorConfig | null> =>
+    ipcRenderer.invoke('get-current-coqui-accelerator'),
+
+  reinstallSileroWithAccelerator: (accelerator: AcceleratorType): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('reinstall-silero-with-accelerator', accelerator),
+
+  reinstallCoquiWithAccelerator: (accelerator: AcceleratorType): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('reinstall-coqui-with-accelerator', accelerator),
+
+  onReinstallProgress: (callback: (data: ReinstallProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: ReinstallProgress) => callback(data)
+    ipcRenderer.on('reinstall-progress', handler)
+    return () => ipcRenderer.removeListener('reinstall-progress', handler)
+  },
 
   installPiperVoice: (lang: 'ru_RU' | 'en_US', voiceName: string, quality: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('install-piper-voice', lang, voiceName, quality),

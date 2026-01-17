@@ -4,7 +4,7 @@ import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
 import { convertToSpeech, getVoicesForLanguage, previewVoice, abortPreview, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, setPreferredDevice, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
-import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools, installEmbeddedPython, checkEmbeddedPythonInstalled, getPythonInfo } from './services/setup'
+import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools, installEmbeddedPython, checkEmbeddedPythonInstalled, getPythonInfo, getAvailableAccelerators, getCurrentAccelerator, reinstallSileroWithAccelerator, reinstallCoquiWithAccelerator, AcceleratorType, ReinstallProgress } from './services/setup'
 
 // Load environment variables from .env file
 config()
@@ -255,11 +255,11 @@ ipcMain.handle('check-python-available', async () => {
   return pythonCmd !== null
 })
 
-ipcMain.handle('install-silero', async (event) => {
+ipcMain.handle('install-silero', async (event, accelerator: AcceleratorType = 'cpu') => {
   try {
     const result = await installSilero((progress) => {
       event.sender.send('setup-progress', progress)
-    })
+    }, accelerator)
     return result
   } catch (error) {
     return { success: false, error: (error as Error).message }
@@ -285,11 +285,11 @@ ipcMain.handle('get-python-info', async () => {
   return await getPythonInfo()
 })
 
-ipcMain.handle('install-coqui', async (event) => {
+ipcMain.handle('install-coqui', async (event, accelerator: AcceleratorType = 'cpu') => {
   try {
     const result = await installCoqui((progress) => {
       event.sender.send('setup-progress', progress)
-    })
+    }, accelerator)
     return result
   } catch (error) {
     return { success: false, error: (error as Error).message }
@@ -330,6 +330,47 @@ ipcMain.handle('install-ffmpeg', async (event) => {
   try {
     const result = await installFfmpeg((progress) => {
       event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+// GPU Accelerator handlers
+ipcMain.handle('get-available-accelerators', async () => {
+  return await getAvailableAccelerators()
+})
+
+ipcMain.handle('get-current-silero-accelerator', async () => {
+  return getCurrentAccelerator('silero')
+})
+
+ipcMain.handle('get-current-coqui-accelerator', async () => {
+  return getCurrentAccelerator('coqui')
+})
+
+ipcMain.handle('reinstall-silero-with-accelerator', async (event, accelerator: AcceleratorType) => {
+  try {
+    // Stop TTS server first
+    await stopTTSServer()
+
+    const result = await reinstallSileroWithAccelerator(accelerator, (progress: ReinstallProgress) => {
+      event.sender.send('reinstall-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('reinstall-coqui-with-accelerator', async (event, accelerator: AcceleratorType) => {
+  try {
+    // Stop TTS server first
+    await stopTTSServer()
+
+    const result = await reinstallCoquiWithAccelerator(accelerator, (progress: ReinstallProgress) => {
+      event.sender.send('reinstall-progress', progress)
     })
     return result
   } catch (error) {
