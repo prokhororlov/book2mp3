@@ -1159,7 +1159,8 @@ export async function installFfmpeg(
   const zipPath = path.join(ffmpegPath, 'ffmpeg-essentials.zip')
   const tempPath = path.join(ffmpegPath, 'temp')
 
-  const ffmpegUrl = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+  // BtbN builds - official recommended source on ffmpeg.org
+  const ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
 
   try {
     onProgress({
