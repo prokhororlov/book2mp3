@@ -7,13 +7,10 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   build-windows:
     runs-on: windows-latest
-    outputs:
-      artifact-id: ${{ steps.upload-artifact.outputs.artifact-id }}
 
     steps:
       - name: Checkout code
@@ -124,62 +121,16 @@ jobs:
         run: dir release
         shell: cmd
 
-      - name: Upload unsigned artifacts
-        id: upload-artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build-unsigned
+          name: windows-build
           path: release/*
           retention-days: 5
 
-  sign-windows:
-    needs: build-windows
-    runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - name: Download unsigned artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-build-unsigned
-          path: release
-
-      - name: List artifacts
-        run: dir release
-        shell: cmd
-
-      - name: Sign with SignPath
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
-          organization-id: 'de2fc7c1-46ef-46b1-98e8-dd431d2b785d'
-          project-slug: 'Book_to_MP3'
-          signing-policy-slug: 'release-signing'
-          github-artifact-id: '${{ needs.build-windows.outputs.artifact-id }}'
-          wait-for-completion: true
-          output-artifact-directory: 'release-signed'
-
-      - name: Upload signed artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build-signed
-          path: release-signed/*
-          retention-days: 5
-
-  release:
-    needs: sign-windows
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - name: Download signed artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-build-signed
-          path: release
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             release/*.exe
