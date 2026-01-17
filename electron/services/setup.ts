@@ -996,6 +996,7 @@ async function downloadFile(
       }
 
       const totalSize = parseInt(response.headers['content-length'] || '0', 10)
+      console.log(`[downloadFile] Starting download: ${url}, size: ${totalSize} bytes`)
       let downloadedSize = 0
 
       // Throttle progress updates to avoid UI flickering
@@ -1012,7 +1013,7 @@ async function downloadFile(
       const fileStream = createWriteStream(destPath)
 
       // Live timeout - resets on each data chunk received
-      const IDLE_TIMEOUT = 30000 // 30 seconds without data = timeout
+      const IDLE_TIMEOUT = 3600000 // 1 hour without data = timeout
       let timeoutId: NodeJS.Timeout | null = null
 
       const resetTimeout = () => {
@@ -1067,6 +1068,14 @@ async function downloadFile(
         // Final progress update to ensure we report 100%
         if (onProgress && totalSize > 0) {
           onProgress(totalSize, totalSize)
+        }
+        // Verify download completed fully
+        if (totalSize > 0 && downloadedSize < totalSize) {
+          if (existsSync(destPath)) {
+            unlinkSync(destPath)
+          }
+          reject(new Error(`Download incomplete: got ${downloadedSize} bytes, expected ${totalSize} bytes`))
+          return
         }
         resolve()
       })
@@ -1167,6 +1176,14 @@ export async function installFfmpeg(
         details: `Downloading FFmpeg... ${Math.round(downloaded / 1024 / 1024)}MB / ${Math.round(total / 1024 / 1024)}MB`
       })
     })
+
+    // Verify download size (should be ~100MB, reject if suspiciously small)
+    const downloadedSize = statSync(zipPath).size
+    const MIN_EXPECTED_SIZE = 50 * 1024 * 1024 // 50MB minimum
+    if (downloadedSize < MIN_EXPECTED_SIZE) {
+      unlinkSync(zipPath)
+      throw new Error(`Downloaded file too small (${Math.round(downloadedSize / 1024 / 1024)}MB). Expected ~100MB. Please check your internet connection.`)
+    }
 
     onProgress({
       stage: 'ffmpeg',

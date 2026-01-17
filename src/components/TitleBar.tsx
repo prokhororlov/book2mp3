@@ -37,7 +37,7 @@ export function TitleBar({ title = 'VoiceCraft', actions }: TitleBarProps) {
         className="flex items-center gap-1.5 h-full px-3 flex-1"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <img src="/icon-no-bg.svg" alt="VoiceCraft" className="w-8 h-8" />
+        <img src="./icon-no-bg.svg" alt="VoiceCraft" className="w-8 h-8" />
         <span className="text-sm font-medium text-foreground/80">
           {title}
         </span>
