@@ -1,4 +1,4 @@
-import fs from 'fs'
+import fs, { existsSync } from 'fs'
 import path from 'path'
 import { exec, spawn, ChildProcess } from 'child_process'
 import { promisify } from 'util'
@@ -1117,10 +1117,24 @@ function getPiperExecutable(): string {
   return path.join(resourcesPath, 'bin', 'piper', 'piper.exe')
 }
 
-// Get path to Python executable for Silero
+// Get path to Python executable for Silero (supports both venv and embedded Python)
 function getSileroPythonExecutable(): string {
   const resourcesPath = getResourcesPath()
-  return path.join(resourcesPath, 'silero', 'venv', 'Scripts', 'python.exe')
+  const venvPython = path.join(resourcesPath, 'silero', 'venv', 'Scripts', 'python.exe')
+
+  // Check venv first (for system Python installations)
+  if (existsSync(venvPython)) {
+    return venvPython
+  }
+
+  // Fall back to embedded Python
+  const embeddedPython = path.join(resourcesPath, 'python', 'python.exe')
+  if (existsSync(embeddedPython)) {
+    return embeddedPython
+  }
+
+  // Return venv path as default (will fail gracefully if not exists)
+  return venvPython
 }
 
 // Get path to Silero script
@@ -1129,10 +1143,24 @@ function getSileroScript(): string {
   return path.join(resourcesPath, 'silero', 'generate.py')
 }
 
-// Coqui XTTS-v2 path helpers
+// Coqui XTTS-v2 path helpers (supports both venv and embedded Python)
 function getCoquiPythonExecutable(): string {
   const resourcesPath = getResourcesPath()
-  return path.join(resourcesPath, 'coqui', 'venv', 'Scripts', 'python.exe')
+  const venvPython = path.join(resourcesPath, 'coqui', 'venv', 'Scripts', 'python.exe')
+
+  // Check venv first (for system Python installations)
+  if (existsSync(venvPython)) {
+    return venvPython
+  }
+
+  // Fall back to embedded Python
+  const embeddedPython = path.join(resourcesPath, 'python', 'python.exe')
+  if (existsSync(embeddedPython)) {
+    return embeddedPython
+  }
+
+  // Return venv path as default (will fail gracefully if not exists)
+  return venvPython
 }
 
 function getCoquiScript(): string {

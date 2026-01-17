@@ -28,6 +28,7 @@ async function runPipWithProgress(
     timeout?: number
     msvcEnvPath?: string // Path to vcvarsall.bat for MSVC environment
     extraArgs?: string[] // Additional pip arguments like --prefer-binary
+    targetDir?: string // Target directory for installation (for embedded Python)
     onProgress?: (info: PipProgressInfo) => void
     onOutput?: (line: string) => void
   } = {}
@@ -35,18 +36,22 @@ async function runPipWithProgress(
   return new Promise((resolve) => {
     let command: string
     let spawnArgs: string[]
-    
+
     // Note: --progress-bar was removed in newer pip versions, pip shows progress by default
     const pipArgs = ['pip', 'install', '--no-input']
-    
+
     if (options.indexUrl) {
       pipArgs.push('--index-url', options.indexUrl)
     }
-    
+
+    if (options.targetDir) {
+      pipArgs.push('--target', options.targetDir)
+    }
+
     if (options.extraArgs) {
       pipArgs.push(...options.extraArgs)
     }
-    
+
     // Add packages (split by space, filter out empty strings)
     pipArgs.push(...packages.split(' ').filter(p => p.trim()))
     
@@ -327,7 +332,7 @@ export function checkEmbeddedPythonInstalled(): boolean {
   return existsSync(pythonExe) && existsSync(pipDir)
 }
 
-// Install embedded Python with pip
+// Install embedded Python with pip (packages install directly, no venv needed)
 export async function installEmbeddedPython(
   onProgress: (progress: SetupProgress) => void
 ): Promise<{ success: boolean; error?: string }> {
@@ -383,7 +388,7 @@ export async function installEmbeddedPython(
     for (const pthFile of pthFiles) {
       const pthPath = path.join(pythonPath, pthFile)
       let content = fs.readFileSync(pthPath, 'utf-8')
-      // Uncomment or add import site
+      // Uncomment import site
       if (content.includes('#import site')) {
         content = content.replace('#import site', 'import site')
       } else if (!content.includes('import site')) {
@@ -418,7 +423,7 @@ export async function installEmbeddedPython(
       details: 'Installing pip...'
     })
 
-    await execAsync(`"${pythonExe}" "${getPipPath}" --no-warn-script-location`, {
+    await execAsync(`"${pythonExe}" "${getPipPath}" --target "${sitePackagesPath}" --no-warn-script-location`, {
       timeout: 180000,
       maxBuffer: 1024 * 1024 * 10,
       cwd: pythonPath
@@ -488,37 +493,78 @@ export async function checkPythonAvailable(): Promise<string | null> {
     }
   }
 
-  // Then check system Python
-  const pythonCommands = ['python', 'python3', 'py']
-
-  for (const cmd of pythonCommands) {
+  // Helper to verify Python executable
+  const verifyPython = async (pythonPath: string): Promise<string | null> => {
     try {
-      const { stdout, stderr } = await execAsync(`${cmd} --version`, { timeout: 5000 })
+      const quotedPath = pythonPath.includes(' ') ? `"${pythonPath}"` : pythonPath
+      const { stdout, stderr } = await execAsync(`${quotedPath} --version`, { timeout: 5000 })
       const output = stdout + stderr
-      if (output.includes('Python 3')) {
-        // Additional check: verify it's 64-bit and compatible version
-        try {
-          const { stdout: archOut } = await execAsync(`${cmd} -c "import struct; print(struct.calcsize('P') * 8)"`, { timeout: 5000 })
-          if (archOut.trim() !== '64') {
-            console.log(`Skipping ${cmd}: 32-bit Python not supported`)
-            continue
-          }
-          // Check version is 3.8-3.12
-          const { stdout: verOut } = await execAsync(`${cmd} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"`, { timeout: 5000 })
-          const [major, minor] = verOut.trim().split('.').map(Number)
-          if (major !== 3 || minor < 8 || minor > 12) {
-            console.log(`Skipping ${cmd}: Python ${verOut.trim()} not supported (need 3.8-3.12)`)
-            continue
-          }
-        } catch {
-          // If we can't verify, still try to use it
-        }
-        return cmd
+      if (!output.includes('Python 3')) {
+        return null
       }
-    } catch (error) {
-      continue
+      // Verify it's 64-bit and compatible version
+      try {
+        const { stdout: archOut } = await execAsync(`${quotedPath} -c "import struct; print(struct.calcsize('P') * 8)"`, { timeout: 5000 })
+        if (archOut.trim() !== '64') {
+          console.log(`Skipping ${pythonPath}: 32-bit Python not supported`)
+          return null
+        }
+        // Check version is 3.8-3.12
+        const { stdout: verOut } = await execAsync(`${quotedPath} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"`, { timeout: 5000 })
+        const [major, minor] = verOut.trim().split('.').map(Number)
+        if (major !== 3 || minor < 8 || minor > 12) {
+          console.log(`Skipping ${pythonPath}: Python ${verOut.trim()} not supported (need 3.8-3.12)`)
+          return null
+        }
+      } catch {
+        // If we can't verify, still try to use it
+      }
+      return pythonPath
+    } catch {
+      return null
     }
   }
+
+  // First check PATH
+  const pythonCommands = ['python', 'python3', 'py']
+  for (const cmd of pythonCommands) {
+    const result = await verifyPython(cmd)
+    if (result) return result
+  }
+
+  // If not in PATH, search common installation locations
+  const userProfile = process.env.USERPROFILE || process.env.HOME || ''
+  const localAppData = process.env.LOCALAPPDATA || path.join(userProfile, 'AppData', 'Local')
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+
+  // Common Python installation paths (sorted by preference: newer versions first)
+  const pythonSearchPaths: string[] = []
+
+  // Python versions to check (3.12 down to 3.8)
+  for (let minor = 12; minor >= 8; minor--) {
+    // User-installed Python (most common)
+    pythonSearchPaths.push(path.join(localAppData, 'Programs', 'Python', `Python3${minor}`, 'python.exe'))
+    // System-wide install
+    pythonSearchPaths.push(path.join(programFiles, `Python3${minor}`, 'python.exe'))
+    pythonSearchPaths.push(path.join(programFilesX86, `Python3${minor}`, 'python.exe'))
+    // Older style paths
+    pythonSearchPaths.push(`C:\\Python3${minor}\\python.exe`)
+  }
+
+  // Also check for pyenv-win
+  pythonSearchPaths.push(path.join(userProfile, '.pyenv', 'pyenv-win', 'shims', 'python.exe'))
+
+  for (const pythonPath of pythonSearchPaths) {
+    if (existsSync(pythonPath)) {
+      const result = await verifyPython(pythonPath)
+      if (result) {
+        console.log(`Found Python at: ${pythonPath}`)
+        return result
+      }
+    }
+  }
+
   return null
 }
 
@@ -756,28 +802,56 @@ export async function installBuildTools(
   }
 }
 
-// Check if Silero venv is set up and working
+// Check if Silero is set up and working (supports both venv and embedded Python)
 export function checkSileroInstalled(): boolean {
   const sileroPath = getSileroPath()
   const venvPython = path.join(sileroPath, 'venv', 'Scripts', 'python.exe')
+  const embeddedPython = getEmbeddedPythonExe()
   const generateScript = path.join(sileroPath, 'generate.py')
 
-  const pythonExists = existsSync(venvPython)
+  // Check if either venv Python or embedded Python exists
+  const venvPythonExists = existsSync(venvPython)
+  const embeddedPythonExists = checkEmbeddedPythonInstalled()
+  const pythonExists = venvPythonExists || embeddedPythonExists
   const scriptExists = existsSync(generateScript)
-  console.log('Silero check:', { sileroPath, venvPython, generateScript, pythonExists, scriptExists })
+
+  console.log('Silero check:', {
+    sileroPath,
+    venvPython,
+    embeddedPython,
+    venvPythonExists,
+    embeddedPythonExists,
+    generateScript,
+    pythonExists,
+    scriptExists
+  })
 
   return pythonExists && scriptExists
 }
 
-// Check if Coqui venv is set up and working
+// Check if Coqui is set up and working (supports both venv and embedded Python)
 export function checkCoquiInstalled(): boolean {
   const coquiPath = getCoquiPath()
   const venvPython = path.join(coquiPath, 'venv', 'Scripts', 'python.exe')
+  const embeddedPython = getEmbeddedPythonExe()
   const generateScript = path.join(coquiPath, 'generate.py')
 
-  const pythonExists = existsSync(venvPython)
+  // Check if either venv Python or embedded Python exists
+  const venvPythonExists = existsSync(venvPython)
+  const embeddedPythonExists = checkEmbeddedPythonInstalled()
+  const pythonExists = venvPythonExists || embeddedPythonExists
   const scriptExists = existsSync(generateScript)
-  console.log('Coqui check:', { coquiPath, venvPython, generateScript, pythonExists, scriptExists })
+
+  console.log('Coqui check:', {
+    coquiPath,
+    venvPython,
+    embeddedPython,
+    venvPythonExists,
+    embeddedPythonExists,
+    generateScript,
+    pythonExists,
+    scriptExists
+  })
 
   return pythonExists && scriptExists
 }
@@ -1418,11 +1492,19 @@ export async function installSilero(
   }
 
   const sileroPath = getSileroPath()
+  const embeddedPythonExe = getEmbeddedPythonExe()
+  const isUsingEmbedded = pythonCmd === embeddedPythonExe
+
+  // For embedded Python: install packages directly (no venv)
+  // For system Python: use venv as before
   const venvPath = path.join(sileroPath, 'venv')
   const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
 
+  // The Python to use for pip install
+  let targetPython: string
+
   // Progress offset: if we installed embedded Python, start from 15%, otherwise from 0%
-  const progressOffset = checkEmbeddedPythonInstalled() ? 15 : 0
+  const progressOffset = isUsingEmbedded ? 15 : 0
   const scaleProgress = (p: number) => Math.min(100, progressOffset + Math.round(p * (100 - progressOffset) / 100))
 
   try {
@@ -1431,45 +1513,59 @@ export async function installSilero(
       mkdirSync(sileroPath, { recursive: true })
     }
 
-    // Clean up incomplete venv if exists but python is missing
-    if (existsSync(venvPath) && !existsSync(venvPython)) {
-      console.log('[installSilero] Removing incomplete venv...')
-      rmSync(venvPath, { recursive: true, force: true })
-    }
+    if (isUsingEmbedded) {
+      // For embedded Python - install packages directly, no venv
+      targetPython = embeddedPythonExe
+      console.log('[installSilero] Using embedded Python directly (no venv)')
 
-    // Create virtual environment if not exists
-    if (!existsSync(venvPython)) {
-      onProgress({
-        stage: 'silero',
-        progress: scaleProgress(5),
-        details: 'Creating Python virtual environment...'
-      })
-
-      // For embedded Python, quote the command path
-      const pythonExecCmd = pythonCmd.includes(' ') ? `"${pythonCmd}"` : pythonCmd
-      await execAsync(`${pythonExecCmd} -m venv "${venvPath}"`, { timeout: 60000 })
-
-      if (!existsSync(venvPython)) {
-        return { success: false, error: 'Failed to create virtual environment' }
-      }
-
-      // Upgrade pip only for fresh venv
       onProgress({
         stage: 'silero',
         progress: scaleProgress(8),
-        details: 'Upgrading pip...'
-      })
-
-      await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
-        timeout: 120000,
-        maxBuffer: 1024 * 1024 * 10
+        details: 'Using embedded Python...'
       })
     } else {
-      onProgress({
-        stage: 'silero',
-        progress: scaleProgress(8),
-        details: 'Using existing virtual environment...'
-      })
+      // For system Python - use venv as before
+      // Clean up incomplete venv if exists but python is missing
+      if (existsSync(venvPath) && !existsSync(venvPython)) {
+        console.log('[installSilero] Removing incomplete venv...')
+        rmSync(venvPath, { recursive: true, force: true })
+      }
+
+      // Create virtual environment if not exists
+      if (!existsSync(venvPython)) {
+        onProgress({
+          stage: 'silero',
+          progress: scaleProgress(5),
+          details: 'Creating Python virtual environment...'
+        })
+
+        const pythonExecCmd = pythonCmd.includes(' ') ? `"${pythonCmd}"` : pythonCmd
+        await execAsync(`${pythonExecCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+
+        if (!existsSync(venvPython)) {
+          return { success: false, error: 'Failed to create virtual environment' }
+        }
+
+        // Upgrade pip only for fresh venv
+        onProgress({
+          stage: 'silero',
+          progress: scaleProgress(8),
+          details: 'Upgrading pip...'
+        })
+
+        await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+          timeout: 120000,
+          maxBuffer: 1024 * 1024 * 10
+        })
+      } else {
+        onProgress({
+          stage: 'silero',
+          progress: scaleProgress(8),
+          details: 'Using existing virtual environment...'
+        })
+      }
+
+      targetPython = venvPython
     }
 
     // Install PyTorch CPU
@@ -1479,12 +1575,18 @@ export async function installSilero(
       details: 'Installing PyTorch (CPU)...'
     })
 
+    // For embedded Python, install to its Lib/site-packages
+    const embeddedTargetDir = isUsingEmbedded
+      ? path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages')
+      : undefined
+
     const pytorchResult = await runPipWithProgress(
-      venvPython,
+      targetPython,
       'torch torchvision torchaudio',
       {
         indexUrl: 'https://download.pytorch.org/whl/cpu',
         timeout: 600000,
+        targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const progress = scaleProgress(10 + Math.round((info.percentage || 0) * 0.5))
           let details = 'Installing PyTorch...'
@@ -1508,10 +1610,11 @@ export async function installSilero(
     })
 
     const depsResult = await runPipWithProgress(
-      venvPython,
+      targetPython,
       'omegaconf numpy scipy flask psutil',
       {
         timeout: 180000,
+        targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const progress = scaleProgress(60 + Math.round((info.percentage || 0) * 0.25))
           let details = 'Installing dependencies...'
@@ -1549,7 +1652,7 @@ export async function installSilero(
       details: 'Verifying installation...'
     })
 
-    const { stdout } = await execAsync(`"${venvPython}" -c "import torch; print('OK')"`, { timeout: 30000 })
+    const { stdout } = await execAsync(`"${targetPython}" -c "import torch; print('OK')"`, { timeout: 30000 })
 
     if (!stdout.includes('OK')) {
       return { success: false, error: 'PyTorch verification failed' }
@@ -1770,12 +1873,39 @@ async function findVcvarsallPath(): Promise<string | null> {
 export async function installCoqui(
   onProgress: (progress: SetupProgress) => void
 ): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> {
-  const pythonCmd = await checkPythonAvailable()
+  let pythonCmd = await checkPythonAvailable()
 
+  // If no Python available, install embedded Python first
   if (!pythonCmd) {
-    return {
-      success: false,
-      error: 'Python 3 is not installed. Please install Python 3.9+ from python.org'
+    onProgress({
+      stage: 'coqui',
+      progress: 0,
+      details: 'Python not found. Installing embedded Python...'
+    })
+
+    const pythonResult = await installEmbeddedPython((p) => {
+      // Scale embedded python progress to 0-10% of overall coqui progress
+      onProgress({
+        stage: 'coqui',
+        progress: Math.round(p.progress * 0.10),
+        details: p.details
+      })
+    })
+
+    if (!pythonResult.success) {
+      return {
+        success: false,
+        error: `Failed to install embedded Python: ${pythonResult.error}`
+      }
+    }
+
+    // Re-check Python after installation
+    pythonCmd = await checkPythonAvailable()
+    if (!pythonCmd) {
+      return {
+        success: false,
+        error: 'Embedded Python installation succeeded but Python is still not available'
+      }
     }
   }
 
@@ -1798,8 +1928,20 @@ export async function installCoqui(
   }
 
   const coquiPath = getCoquiPath()
+  const embeddedPythonExe = getEmbeddedPythonExe()
+  const isUsingEmbedded = pythonCmd === embeddedPythonExe
+
+  // For embedded Python: install packages directly (no venv)
+  // For system Python: use venv as before
   const venvPath = path.join(coquiPath, 'venv')
   const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+
+  // The Python to use for pip install
+  let targetPython: string
+
+  // Progress offset: if we installed embedded Python, start from 10%, otherwise from 0%
+  const progressOffset = isUsingEmbedded ? 10 : 0
+  const scaleProgress = (p: number) => Math.min(100, progressOffset + Math.round(p * (100 - progressOffset) / 100))
 
   try {
     if (!existsSync(coquiPath)) {
@@ -1811,62 +1953,84 @@ export async function installCoqui(
       mkdirSync(voicesPath, { recursive: true })
     }
 
-    // Clean up incomplete venv if exists but python is missing
-    if (existsSync(venvPath) && !existsSync(venvPython)) {
-      console.log('[installCoqui] Removing incomplete venv...')
-      rmSync(venvPath, { recursive: true, force: true })
-    }
+    if (isUsingEmbedded) {
+      // For embedded Python - install packages directly, no venv
+      targetPython = embeddedPythonExe
+      console.log('[installCoqui] Using embedded Python directly (no venv)')
 
-    // Create virtual environment if not exists
-    if (!existsSync(venvPython)) {
       onProgress({
         stage: 'coqui',
-        progress: 2,
-        details: 'Creating Python virtual environment...'
-      })
-
-      await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
-
-      if (!existsSync(venvPython)) {
-        return { success: false, error: 'Failed to create virtual environment' }
-      }
-
-      // Upgrade pip only for fresh venv
-      onProgress({
-        stage: 'coqui',
-        progress: 5,
-        details: 'Upgrading pip...'
-      })
-
-      await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
-        timeout: 120000,
-        maxBuffer: 1024 * 1024 * 10
+        progress: scaleProgress(5),
+        details: 'Using embedded Python...'
       })
     } else {
-      onProgress({
-        stage: 'coqui',
-        progress: 5,
-        details: 'Using existing virtual environment...'
-      })
+      // For system Python - use venv as before
+      // Clean up incomplete venv if exists but python is missing
+      if (existsSync(venvPath) && !existsSync(venvPython)) {
+        console.log('[installCoqui] Removing incomplete venv...')
+        rmSync(venvPath, { recursive: true, force: true })
+      }
+
+      // Create virtual environment if not exists
+      if (!existsSync(venvPython)) {
+        onProgress({
+          stage: 'coqui',
+          progress: scaleProgress(2),
+          details: 'Creating Python virtual environment...'
+        })
+
+        const pythonExecCmd = pythonCmd.includes(' ') ? `"${pythonCmd}"` : pythonCmd
+        await execAsync(`${pythonExecCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+
+        if (!existsSync(venvPython)) {
+          return { success: false, error: 'Failed to create virtual environment' }
+        }
+
+        // Upgrade pip only for fresh venv
+        onProgress({
+          stage: 'coqui',
+          progress: scaleProgress(5),
+          details: 'Upgrading pip...'
+        })
+
+        await execAsync(`"${venvPython}" -m pip install --upgrade pip --no-input`, {
+          timeout: 120000,
+          maxBuffer: 1024 * 1024 * 10
+        })
+      } else {
+        onProgress({
+          stage: 'coqui',
+          progress: scaleProgress(5),
+          details: 'Using existing virtual environment...'
+        })
+      }
+
+      targetPython = venvPython
     }
+
+    // For embedded Python, install to its Lib/site-packages
+    const embeddedTargetDir = isUsingEmbedded
+      ? path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages')
+      : undefined
 
     // Install PyTorch CPU - range 5% to 40%
     onProgress({
       stage: 'coqui',
-      progress: 8,
+      progress: scaleProgress(8),
       details: 'Downloading PyTorch (~200MB)...'
     })
 
     const pytorchResult = await runPipWithProgress(
-      venvPython,
+      targetPython,
       'torch torchaudio',
       {
         indexUrl: 'https://download.pytorch.org/whl/cpu',
         timeout: 1200000,
+        targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const baseProgress = 8
           const rangeSize = 32 // 8% to 40%
-          
+
           let subProgress = 0
           if (info.phase === 'collecting') {
             subProgress = 0
@@ -1877,9 +2041,9 @@ export async function installCoqui(
           } else if (info.phase === 'processing') {
             subProgress = 100
           }
-          
-          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
-          
+
+          const totalProgress = scaleProgress(Math.round(baseProgress + (subProgress / 100) * rangeSize))
+
           let details = 'Installing PyTorch...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             if (info.downloaded !== undefined && info.total !== undefined) {
@@ -1892,7 +2056,7 @@ export async function installCoqui(
           } else if (info.phase === 'installing') {
             details = 'Installing downloaded packages...'
           }
-          
+
           onProgress({
             stage: 'coqui',
             progress: totalProgress,
@@ -1913,28 +2077,29 @@ export async function installCoqui(
     // Install numpy, scipy - range 40% to 50%
     onProgress({
       stage: 'coqui',
-      progress: 42,
+      progress: scaleProgress(42),
       details: 'Installing numpy, scipy, omegaconf...'
     })
 
     const depsResult = await runPipWithProgress(
-      venvPython,
+      targetPython,
       'numpy scipy omegaconf',
       {
         timeout: 300000,
         extraArgs: ['--prefer-binary'],
+        targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const baseProgress = 42
           const rangeSize = 8
-          
+
           let subProgress = (info.percentage || 0)
-          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
-          
+          const totalProgress = scaleProgress(Math.round(baseProgress + (subProgress / 100) * rangeSize))
+
           let details = 'Installing dependencies...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             details = `Downloading ${info.package}: ${info.percentage}%`
           }
-          
+
           onProgress({
             stage: 'coqui',
             progress: totalProgress,
@@ -1952,20 +2117,21 @@ export async function installCoqui(
     // Install Coqui TTS with MSVC - range 50% to 80%
     onProgress({
       stage: 'coqui',
-      progress: 50,
+      progress: scaleProgress(50),
       details: 'Installing Coqui TTS (downloading and compiling)...'
     })
 
     const ttsResult = await runPipWithProgress(
-      venvPython,
+      targetPython,
       'TTS flask psutil',
       {
         timeout: 1200000,
         msvcEnvPath: vcvarsallPath,
+        targetDir: embeddedTargetDir,
         onProgress: (info) => {
           const baseProgress = 50
           const rangeSize = 30 // 50% to 80%
-          
+
           let subProgress = 0
           if (info.phase === 'collecting') {
             subProgress = 5
@@ -1977,9 +2143,9 @@ export async function installCoqui(
           } else if (info.phase === 'installing') {
             subProgress = 95
           }
-          
-          const totalProgress = Math.round(baseProgress + (subProgress / 100) * rangeSize)
-          
+
+          const totalProgress = scaleProgress(Math.round(baseProgress + (subProgress / 100) * rangeSize))
+
           let details = 'Installing Coqui TTS...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             details = `Downloading ${info.package}: ${info.percentage}%`
@@ -1990,7 +2156,7 @@ export async function installCoqui(
           } else if (info.phase === 'installing') {
             details = 'Installing compiled packages...'
           }
-          
+
           onProgress({
             stage: 'coqui',
             progress: totalProgress,
@@ -2009,18 +2175,22 @@ export async function installCoqui(
     // Newer transformers removed BeamSearchScorer which TTS needs
     onProgress({
       stage: 'coqui',
-      progress: 80,
+      progress: scaleProgress(80),
       details: 'Fixing transformers compatibility...'
     })
 
-    await execAsync(`"${venvPython}" -m pip install "transformers>=4.33.0,<4.40.0" --no-input`, {
+    const transformersCmd = embeddedTargetDir
+      ? `"${targetPython}" -m pip install "transformers>=4.33.0,<4.40.0" --target "${embeddedTargetDir}" --no-input`
+      : `"${targetPython}" -m pip install "transformers>=4.33.0,<4.40.0" --no-input`
+
+    await execAsync(transformersCmd, {
       timeout: 180000,
       maxBuffer: 1024 * 1024 * 10
     })
 
     onProgress({
       stage: 'coqui',
-      progress: 82,
+      progress: scaleProgress(82),
       details: 'Setting up generation script...'
     })
 
@@ -2029,7 +2199,7 @@ export async function installCoqui(
 
     onProgress({
       stage: 'coqui',
-      progress: 85,
+      progress: scaleProgress(85),
       details: 'Verifying installation...'
     })
 
@@ -2041,7 +2211,7 @@ export async function installCoqui(
     let lastError = ''
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const { stdout } = await execAsync(`"${venvPython}" -c "from TTS.api import TTS; print('OK')"`, { timeout: 60000 })
+        const { stdout } = await execAsync(`"${targetPython}" -c "from TTS.api import TTS; print('OK')"`, { timeout: 60000 })
         if (stdout.includes('OK')) {
           verifySuccess = true
           break
@@ -2063,7 +2233,7 @@ export async function installCoqui(
     // Pre-download XTTS-v2 model - range 85% to 100%
     onProgress({
       stage: 'coqui',
-      progress: 87,
+      progress: scaleProgress(87),
       details: 'Pre-downloading XTTS-v2 model (~1.8GB)...'
     })
 
@@ -2102,7 +2272,7 @@ print("Model downloaded successfully")
     try {
       // Run model download with progress tracking
       await new Promise<void>((resolve, reject) => {
-        const proc = spawn(venvPython, [preloadScriptPath], {
+        const proc = spawn(targetPython, [preloadScriptPath], {
           shell: true,
           env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
         })
@@ -2116,7 +2286,7 @@ print("Model downloaded successfully")
             if (match) {
               const modelPercent = parseInt(match[1], 10)
               // Map model download progress to 87-98%
-              const totalProgress = 87 + Math.round(modelPercent * 0.11)
+              const totalProgress = scaleProgress(87 + Math.round(modelPercent * 0.11))
               onProgress({
                 stage: 'coqui',
                 progress: totalProgress,
@@ -2126,20 +2296,20 @@ print("Model downloaded successfully")
             if (line.includes('Model downloaded successfully')) {
               onProgress({
                 stage: 'coqui',
-                progress: 98,
+                progress: scaleProgress(98),
                 details: 'Model download complete!'
               })
             }
           }
         })
-        
+
         proc.stderr?.on('data', (data: Buffer) => {
           stderr += data.toString()
           // TTS library outputs download progress to stderr
           const progressMatch = data.toString().match(/(\d+)%\|/)
           if (progressMatch) {
             const modelPercent = parseInt(progressMatch[1], 10)
-            const totalProgress = 87 + Math.round(modelPercent * 0.11)
+            const totalProgress = scaleProgress(87 + Math.round(modelPercent * 0.11))
             onProgress({
               stage: 'coqui',
               progress: totalProgress,
