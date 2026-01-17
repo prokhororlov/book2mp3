@@ -122,6 +122,16 @@ const electronAPI = {
   checkPythonAvailable: (): Promise<boolean> =>
     ipcRenderer.invoke('check-python-available'),
 
+  // Embedded Python management
+  installEmbeddedPython: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-embedded-python'),
+
+  checkEmbeddedPython: (): Promise<boolean> =>
+    ipcRenderer.invoke('check-embedded-python'),
+
+  getPythonInfo: (): Promise<{ available: boolean; path: string | null; isEmbedded: boolean; version: string | null }> =>
+    ipcRenderer.invoke('get-python-info'),
+
   installSilero: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('install-silero'),
 

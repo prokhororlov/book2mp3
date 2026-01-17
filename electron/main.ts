@@ -4,7 +4,7 @@ import fs from 'fs'
 import { config } from 'dotenv'
 import { parseBook } from './services/parser'
 import { convertToSpeech, getVoicesForLanguage, previewVoice, abortPreview, setElevenLabsApiKey, getElevenLabsApiKey, getAvailableProviders, startTTSServer, stopTTSServer, getTTSServerStatus, loadTTSModel, unloadTTSModel, setPreferredDevice, killOrphanTTSServers, cleanupTempAudio } from './services/tts'
-import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools } from './services/setup'
+import { checkDependencies, checkDependenciesAsync, needsSetup, runSetup, getEstimatedDownloadSize, SetupProgress, installSilero, installCoqui, checkPythonAvailable, installPiperVoice, installRHVoiceCore, installRHVoice, getInstalledRHVoices, getAvailableRHVoices, RHVOICE_VOICE_URLS, installPiper, installFfmpeg, checkBuildToolsAvailable, installBuildTools, installEmbeddedPython, checkEmbeddedPythonInstalled, getPythonInfo } from './services/setup'
 
 // Load environment variables from .env file
 config()
@@ -264,6 +264,25 @@ ipcMain.handle('install-silero', async (event) => {
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
+})
+
+ipcMain.handle('install-embedded-python', async (event) => {
+  try {
+    const result = await installEmbeddedPython((progress) => {
+      event.sender.send('setup-progress', progress)
+    })
+    return result
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('check-embedded-python', async () => {
+  return checkEmbeddedPythonInstalled()
+})
+
+ipcMain.handle('get-python-info', async () => {
+  return await getPythonInfo()
 })
 
 ipcMain.handle('install-coqui', async (event) => {

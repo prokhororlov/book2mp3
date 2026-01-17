@@ -305,8 +305,190 @@ export function getAvailableRHVoices(language: string): Array<{ name: string; ge
   return Object.entries(voices).map(([name, info]) => ({ name, gender: info.gender }))
 }
 
-// Check if system Python is available
+// Embedded Python configuration
+const EMBEDDED_PYTHON_VERSION = '3.11.9'
+const EMBEDDED_PYTHON_URL = `https://www.python.org/ftp/python/${EMBEDDED_PYTHON_VERSION}/python-${EMBEDDED_PYTHON_VERSION}-embed-amd64.zip`
+const GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
+
+// Get path to embedded Python directory
+export function getEmbeddedPythonPath(): string {
+  return path.join(getResourcesPath(), 'python')
+}
+
+// Get path to embedded Python executable
+export function getEmbeddedPythonExe(): string {
+  return path.join(getEmbeddedPythonPath(), 'python.exe')
+}
+
+// Check if embedded Python is installed and working
+export function checkEmbeddedPythonInstalled(): boolean {
+  const pythonExe = getEmbeddedPythonExe()
+  const pipDir = path.join(getEmbeddedPythonPath(), 'Lib', 'site-packages', 'pip')
+  return existsSync(pythonExe) && existsSync(pipDir)
+}
+
+// Install embedded Python with pip
+export async function installEmbeddedPython(
+  onProgress: (progress: SetupProgress) => void
+): Promise<{ success: boolean; error?: string }> {
+  const pythonPath = getEmbeddedPythonPath()
+  const pythonExe = getEmbeddedPythonExe()
+  const zipPath = path.join(pythonPath, 'python-embed.zip')
+  const getPipPath = path.join(pythonPath, 'get-pip.py')
+
+  try {
+    // Create directory
+    if (!existsSync(pythonPath)) {
+      mkdirSync(pythonPath, { recursive: true })
+    }
+
+    // Download embedded Python
+    onProgress({
+      stage: 'python',
+      progress: 0,
+      details: 'Downloading embedded Python...'
+    })
+
+    await downloadFile(EMBEDDED_PYTHON_URL, zipPath, (downloaded, total) => {
+      const percent = Math.round((downloaded / total) * 40)
+      onProgress({
+        stage: 'python',
+        progress: percent,
+        details: `Downloading Python ${EMBEDDED_PYTHON_VERSION}... ${Math.round(downloaded / 1024 / 1024)}MB / ${Math.round(total / 1024 / 1024)}MB`
+      })
+    })
+
+    // Extract
+    onProgress({
+      stage: 'python',
+      progress: 45,
+      details: 'Extracting Python...'
+    })
+
+    await extractZip(zipPath, pythonPath)
+
+    // Clean up zip
+    if (existsSync(zipPath)) {
+      unlinkSync(zipPath)
+    }
+
+    // Enable site-packages by modifying python*._pth file
+    onProgress({
+      stage: 'python',
+      progress: 50,
+      details: 'Configuring Python...'
+    })
+
+    const pthFiles = fs.readdirSync(pythonPath).filter(f => f.endsWith('._pth'))
+    for (const pthFile of pthFiles) {
+      const pthPath = path.join(pythonPath, pthFile)
+      let content = fs.readFileSync(pthPath, 'utf-8')
+      // Uncomment or add import site
+      if (content.includes('#import site')) {
+        content = content.replace('#import site', 'import site')
+      } else if (!content.includes('import site')) {
+        content += '\nimport site\n'
+      }
+      // Add Lib/site-packages path
+      if (!content.includes('Lib/site-packages')) {
+        content += '\nLib/site-packages\n'
+      }
+      fs.writeFileSync(pthPath, content, 'utf-8')
+    }
+
+    // Create Lib/site-packages directory
+    const sitePackagesPath = path.join(pythonPath, 'Lib', 'site-packages')
+    if (!existsSync(sitePackagesPath)) {
+      mkdirSync(sitePackagesPath, { recursive: true })
+    }
+
+    // Download get-pip.py
+    onProgress({
+      stage: 'python',
+      progress: 55,
+      details: 'Downloading pip installer...'
+    })
+
+    await downloadFile(GET_PIP_URL, getPipPath)
+
+    // Install pip
+    onProgress({
+      stage: 'python',
+      progress: 60,
+      details: 'Installing pip...'
+    })
+
+    await execAsync(`"${pythonExe}" "${getPipPath}" --no-warn-script-location`, {
+      timeout: 180000,
+      maxBuffer: 1024 * 1024 * 10,
+      cwd: pythonPath
+    })
+
+    // Clean up get-pip.py
+    if (existsSync(getPipPath)) {
+      unlinkSync(getPipPath)
+    }
+
+    // Verify pip installation
+    onProgress({
+      stage: 'python',
+      progress: 90,
+      details: 'Verifying pip installation...'
+    })
+
+    const { stdout } = await execAsync(`"${pythonExe}" -m pip --version`, { timeout: 30000 })
+    if (!stdout.includes('pip')) {
+      return { success: false, error: 'Failed to install pip' }
+    }
+
+    // Upgrade pip
+    onProgress({
+      stage: 'python',
+      progress: 95,
+      details: 'Upgrading pip...'
+    })
+
+    await execAsync(`"${pythonExe}" -m pip install --upgrade pip --no-warn-script-location`, {
+      timeout: 120000,
+      maxBuffer: 1024 * 1024 * 10
+    })
+
+    onProgress({
+      stage: 'python',
+      progress: 100,
+      details: 'Embedded Python installed successfully!'
+    })
+
+    return { success: true }
+  } catch (error) {
+    // Clean up on error
+    try {
+      if (existsSync(zipPath)) unlinkSync(zipPath)
+      if (existsSync(getPipPath)) unlinkSync(getPipPath)
+    } catch {
+      // Ignore cleanup errors
+    }
+    return { success: false, error: (error as Error).message }
+  }
+}
+
+// Check if system Python is available (checks embedded first, then system)
 export async function checkPythonAvailable(): Promise<string | null> {
+  // First check embedded Python
+  if (checkEmbeddedPythonInstalled()) {
+    const embeddedExe = getEmbeddedPythonExe()
+    try {
+      const { stdout, stderr } = await execAsync(`"${embeddedExe}" --version`, { timeout: 5000 })
+      const output = stdout + stderr
+      if (output.includes('Python 3')) {
+        return embeddedExe
+      }
+    } catch {
+      // Embedded Python check failed, continue to system Python
+    }
+  }
+
+  // Then check system Python
   const pythonCommands = ['python', 'python3', 'py']
 
   for (const cmd of pythonCommands) {
@@ -314,6 +496,23 @@ export async function checkPythonAvailable(): Promise<string | null> {
       const { stdout, stderr } = await execAsync(`${cmd} --version`, { timeout: 5000 })
       const output = stdout + stderr
       if (output.includes('Python 3')) {
+        // Additional check: verify it's 64-bit and compatible version
+        try {
+          const { stdout: archOut } = await execAsync(`${cmd} -c "import struct; print(struct.calcsize('P') * 8)"`, { timeout: 5000 })
+          if (archOut.trim() !== '64') {
+            console.log(`Skipping ${cmd}: 32-bit Python not supported`)
+            continue
+          }
+          // Check version is 3.8-3.12
+          const { stdout: verOut } = await execAsync(`${cmd} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"`, { timeout: 5000 })
+          const [major, minor] = verOut.trim().split('.').map(Number)
+          if (major !== 3 || minor < 8 || minor > 12) {
+            console.log(`Skipping ${cmd}: Python ${verOut.trim()} not supported (need 3.8-3.12)`)
+            continue
+          }
+        } catch {
+          // If we can't verify, still try to use it
+        }
         return cmd
       }
     } catch (error) {
@@ -321,6 +520,39 @@ export async function checkPythonAvailable(): Promise<string | null> {
     }
   }
   return null
+}
+
+// Check if Python is available (system or embedded) - returns info about which one
+export async function getPythonInfo(): Promise<{ available: boolean; path: string | null; isEmbedded: boolean; version: string | null }> {
+  // First check embedded Python
+  if (checkEmbeddedPythonInstalled()) {
+    const embeddedExe = getEmbeddedPythonExe()
+    try {
+      const { stdout, stderr } = await execAsync(`"${embeddedExe}" --version`, { timeout: 5000 })
+      const output = stdout + stderr
+      const match = output.match(/Python (\d+\.\d+\.\d+)/)
+      if (match) {
+        return { available: true, path: embeddedExe, isEmbedded: true, version: match[1] }
+      }
+    } catch {
+      // Continue to system Python
+    }
+  }
+
+  // Check system Python
+  const pythonCmd = await checkPythonAvailable()
+  if (pythonCmd && !pythonCmd.includes(getEmbeddedPythonPath())) {
+    try {
+      const { stdout, stderr } = await execAsync(`${pythonCmd} --version`, { timeout: 5000 })
+      const output = stdout + stderr
+      const match = output.match(/Python (\d+\.\d+\.\d+)/)
+      return { available: true, path: pythonCmd, isEmbedded: false, version: match ? match[1] : null }
+    } catch {
+      // Failed
+    }
+  }
+
+  return { available: false, path: null, isEmbedded: false, version: null }
 }
 
 
@@ -1145,22 +1377,53 @@ export async function getEstimatedDownloadSize(): Promise<{ size: number; includ
   return { size, includeSilero }
 }
 
-// Install Silero TTS (requires Python to be installed on system)
+// Install Silero TTS (will auto-install embedded Python if system Python is not available)
 export async function installSilero(
   onProgress: (progress: SetupProgress) => void
 ): Promise<{ success: boolean; error?: string }> {
-  const pythonCmd = await checkPythonAvailable()
+  let pythonCmd = await checkPythonAvailable()
 
+  // If no Python available, install embedded Python first
   if (!pythonCmd) {
-    return {
-      success: false,
-      error: 'Python 3 is not installed. Please install Python 3.9+ from python.org'
+    onProgress({
+      stage: 'silero',
+      progress: 0,
+      details: 'Python not found. Installing embedded Python...'
+    })
+
+    const pythonResult = await installEmbeddedPython((p) => {
+      // Scale embedded python progress to 0-15% of overall silero progress
+      onProgress({
+        stage: 'silero',
+        progress: Math.round(p.progress * 0.15),
+        details: p.details
+      })
+    })
+
+    if (!pythonResult.success) {
+      return {
+        success: false,
+        error: `Failed to install embedded Python: ${pythonResult.error}`
+      }
+    }
+
+    // Re-check Python after installation
+    pythonCmd = await checkPythonAvailable()
+    if (!pythonCmd) {
+      return {
+        success: false,
+        error: 'Embedded Python installation succeeded but Python is still not available'
+      }
     }
   }
 
   const sileroPath = getSileroPath()
   const venvPath = path.join(sileroPath, 'venv')
   const venvPython = path.join(venvPath, 'Scripts', 'python.exe')
+
+  // Progress offset: if we installed embedded Python, start from 15%, otherwise from 0%
+  const progressOffset = checkEmbeddedPythonInstalled() ? 15 : 0
+  const scaleProgress = (p: number) => Math.min(100, progressOffset + Math.round(p * (100 - progressOffset) / 100))
 
   try {
     // Create silero directory
@@ -1178,11 +1441,13 @@ export async function installSilero(
     if (!existsSync(venvPython)) {
       onProgress({
         stage: 'silero',
-        progress: 5,
+        progress: scaleProgress(5),
         details: 'Creating Python virtual environment...'
       })
 
-      await execAsync(`${pythonCmd} -m venv "${venvPath}"`, { timeout: 60000 })
+      // For embedded Python, quote the command path
+      const pythonExecCmd = pythonCmd.includes(' ') ? `"${pythonCmd}"` : pythonCmd
+      await execAsync(`${pythonExecCmd} -m venv "${venvPath}"`, { timeout: 60000 })
 
       if (!existsSync(venvPython)) {
         return { success: false, error: 'Failed to create virtual environment' }
@@ -1191,7 +1456,7 @@ export async function installSilero(
       // Upgrade pip only for fresh venv
       onProgress({
         stage: 'silero',
-        progress: 8,
+        progress: scaleProgress(8),
         details: 'Upgrading pip...'
       })
 
@@ -1202,7 +1467,7 @@ export async function installSilero(
     } else {
       onProgress({
         stage: 'silero',
-        progress: 8,
+        progress: scaleProgress(8),
         details: 'Using existing virtual environment...'
       })
     }
@@ -1210,7 +1475,7 @@ export async function installSilero(
     // Install PyTorch CPU
     onProgress({
       stage: 'silero',
-      progress: 10,
+      progress: scaleProgress(10),
       details: 'Installing PyTorch (CPU)...'
     })
 
@@ -1221,7 +1486,7 @@ export async function installSilero(
         indexUrl: 'https://download.pytorch.org/whl/cpu',
         timeout: 600000,
         onProgress: (info) => {
-          const progress = 10 + Math.round((info.percentage || 0) * 0.5)
+          const progress = scaleProgress(10 + Math.round((info.percentage || 0) * 0.5))
           let details = 'Installing PyTorch...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             details = `Downloading ${info.package}: ${info.percentage}%`
@@ -1238,7 +1503,7 @@ export async function installSilero(
     // Install additional dependencies (60% to 85%)
     onProgress({
       stage: 'silero',
-      progress: 60,
+      progress: scaleProgress(60),
       details: 'Installing additional dependencies...'
     })
 
@@ -1248,7 +1513,7 @@ export async function installSilero(
       {
         timeout: 180000,
         onProgress: (info) => {
-          const progress = 60 + Math.round((info.percentage || 0) * 0.25)
+          const progress = scaleProgress(60 + Math.round((info.percentage || 0) * 0.25))
           let details = 'Installing dependencies...'
           if (info.phase === 'downloading' && info.percentage !== undefined) {
             details = `Downloading ${info.package}: ${info.percentage}%`
@@ -1265,7 +1530,7 @@ export async function installSilero(
     // Copy generate.py script
     onProgress({
       stage: 'silero',
-      progress: 88,
+      progress: scaleProgress(88),
       details: 'Setting up generation script...'
     })
 
@@ -1280,7 +1545,7 @@ export async function installSilero(
     // Verify installation
     onProgress({
       stage: 'silero',
-      progress: 94,
+      progress: scaleProgress(94),
       details: 'Verifying installation...'
     })
 
