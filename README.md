@@ -224,9 +224,44 @@ book-to-mp3/
 |-------------|----------|------------|--------------|----------|---------------------------|
 | RHVoice     | Fast     | Good       | ~15 MB       | CPU      | Quick processing          |
 | Piper       | Fast     | Good       | ~50 MB       | CPU      | Balanced option           |
-| Silero      | Medium   | Excellent  | ~100-200 MB  | CPU      | Natural Russian voices    |
+| Silero      | Medium   | Excellent  | ~100-200 MB  | CPU/GPU  | Natural Russian voices    |
 | Coqui       | Slow     | Premium    | ~2 GB        | CPU/GPU  | Best offline quality      |
 | ElevenLabs  | Fast     | Premium    | Cloud        | API      | Best overall quality      |
+
+### GPU Acceleration
+
+Silero and Coqui support hardware acceleration for faster speech generation:
+
+| Accelerator | Supported GPUs | PyTorch Size | Speed Boost |
+|-------------|----------------|--------------|-------------|
+| **CUDA**    | NVIDIA (GTX 10xx+, RTX series) | ~2.3 GB | 3-10x |
+| **Intel XPU** | Intel Arc, Iris Xe, UHD 7xx+ | ~500 MB | 2-5x |
+| **CPU**     | Any | ~200 MB | Baseline |
+
+#### Enabling GPU Acceleration
+
+1. **During initial setup**: When installing Silero or Coqui, select your preferred accelerator (CUDA, Intel XPU, or CPU)
+
+2. **Change accelerator later**: Go to Settings → TTS Setup → click "Reinstall" button next to Silero or Coqui to change the accelerator
+
+#### Requirements
+
+**For NVIDIA CUDA:**
+- NVIDIA GPU with CUDA support (GTX 10xx or newer recommended)
+- Latest NVIDIA drivers installed
+- Automatically detected via `nvidia-smi`
+
+**For Intel XPU:**
+- Intel Arc, Iris Xe, or UHD Graphics 7xx+
+- Latest Intel GPU drivers
+- Intel Extension for PyTorch (installed automatically)
+
+#### Auto-Detection
+
+The application automatically detects available GPUs:
+- Priority order: CUDA → Intel XPU → CPU
+- GPU name and VRAM are displayed in the setup dialog
+- If no compatible GPU is found, CPU mode is used
 
 ### Parallelization
 
