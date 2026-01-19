@@ -65,7 +65,7 @@ export function ErrorDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          <DialogDescription className="text-left">
+          <DialogDescription className="text-left select-text">
             {error.message}
           </DialogDescription>
 
@@ -74,13 +74,13 @@ export function ErrorDialog({
               <summary className="text-muted-foreground cursor-pointer hover:text-foreground">
                 {t.common.details}
               </summary>
-              <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-auto max-h-32">
+              <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-auto max-h-32 select-text">
                 {error.details}
               </pre>
             </details>
           )}
 
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground select-text">
             {suggestion}
           </p>
         </div>

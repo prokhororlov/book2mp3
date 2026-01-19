@@ -62,7 +62,7 @@ export function UpdateModal({
             </>
           )}
           {updateInfo.error && (
-            <p className="text-sm text-destructive">{updateInfo.error}</p>
+            <p className="text-sm text-destructive select-text">{updateInfo.error}</p>
           )}
           <div className="flex gap-2 justify-end">
             <Button variant="outline" onClick={onClose} disabled={isDownloading}>

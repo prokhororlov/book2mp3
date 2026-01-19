@@ -51,7 +51,7 @@ export function ToolkitErrorDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <DialogDescription className="text-left">
+          <DialogDescription className="text-left select-text">
             {error.description || (
               requiresRestart
                 ? `${toolkitName} ${t.toolkit.restartRequired}`
@@ -62,7 +62,7 @@ export function ToolkitErrorDialog({
           {error.steps && error.steps.length > 0 && (
             <div className="bg-muted/50 rounded-lg p-4">
               <p className="text-sm font-medium mb-2">{t.toolkit.installSteps}</p>
-              <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+              <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside select-text">
                 {error.steps.map((step, index) => (
                   <li key={index}>{step}</li>
                 ))}

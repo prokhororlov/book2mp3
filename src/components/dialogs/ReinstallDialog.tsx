@@ -166,7 +166,7 @@ export function ReinstallProgressDialog({
                   <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                   <div className="text-xs">
                     <p className="font-medium">{t.errors.setup}</p>
-                    <p className="mt-0.5">{progress.message}</p>
+                    <p className="mt-0.5 select-text">{progress.message}</p>
                   </div>
                 </div>
               )}
