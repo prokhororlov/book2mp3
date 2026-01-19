@@ -19,6 +19,7 @@ import { ReinstallConfirmDialog, ReinstallProgressDialog } from '@/components/di
 import { UpdateModal } from '@/components/dialogs/UpdateModal'
 import { SettingsDialog } from '@/components/dialogs/SettingsDialog'
 import { PlaybackSettingsContent } from '@/components/settings/PlaybackSettings'
+import { CustomVoiceModal, type CustomVoiceMetadata } from '@/components/dialogs/CustomVoiceModal'
 
 import { useTheme, useWindowState, useUpdates } from '@/hooks'
 import { PROVIDER_ICONS } from '@/constants'
@@ -129,6 +130,13 @@ function App() {
   const [voiceInstallProgress, setVoiceInstallProgress] = useState<number>(0)
   const [installingRHVoice, setInstallingRHVoice] = useState<string | null>(null)
   const [rhvoiceInstallProgress, setRHVoiceInstallProgress] = useState<number>(0)
+
+  // ==================== VOICE CLONING STATE (Coqui) ====================
+  const [voiceCloningEnabled, setVoiceCloningEnabled] = useState(false)
+  const [customVoices, setCustomVoices] = useState<CustomVoiceMetadata[]>([])
+  const [selectedCustomVoice, setSelectedCustomVoice] = useState<string>('')
+  const [showCustomVoiceModal, setShowCustomVoiceModal] = useState(false)
+  const [editingCustomVoice, setEditingCustomVoice] = useState<CustomVoiceMetadata | null>(null)
 
   // ==================== GPU ACCELERATOR STATE ====================
   const [availableAccelerators, setAvailableAccelerators] = useState<AcceleratorInfo | null>(null)
@@ -258,6 +266,22 @@ function App() {
     loadApiKey()
     checkProviders()
   }, [])
+
+  // Load custom voices when Coqui is selected
+  useEffect(() => {
+    const loadCustomVoices = async () => {
+      if (!window.electronAPI) return
+      if (selectedProvider === 'coqui') {
+        try {
+          const voices = await window.electronAPI.getCustomVoices()
+          setCustomVoices(voices)
+        } catch (err) {
+          console.error('Failed to load custom voices:', err)
+        }
+      }
+    }
+    loadCustomVoices()
+  }, [selectedProvider])
 
   // Load voices
   useEffect(() => {
@@ -407,7 +431,12 @@ function App() {
   }
 
   const handleConvert = async () => {
-    if (!window.electronAPI || !bookContent || !selectedVoice) return
+    // For voice cloning mode, check custom voice; otherwise check regular voice
+    const voiceToUse = voiceCloningEnabled && selectedProvider === 'coqui'
+      ? selectedCustomVoice
+      : selectedVoice
+
+    if (!window.electronAPI || !bookContent || !voiceToUse) return
 
     const safeFilename = sanitizeFilename(bookContent.title)
     const outputPath = await window.electronAPI.saveFileDialog(`${safeFilename}.mp3`)
@@ -431,9 +460,14 @@ function App() {
       options.timeStretch = timeStretch[0]
     }
 
+    // Add custom voice ID for voice cloning
+    if (voiceCloningEnabled && selectedProvider === 'coqui' && selectedCustomVoice) {
+      options.customVoiceId = selectedCustomVoice
+    }
+
     const result = await window.electronAPI.convertToSpeech(
       bookContent.fullText,
-      selectedVoice,
+      voiceToUse,
       outputPath,
       options
     )
@@ -455,7 +489,12 @@ function App() {
   }
 
   const handlePreviewVoice = async () => {
-    if (!window.electronAPI || !selectedVoice || isPreviewing) return
+    // For voice cloning mode, check custom voice; otherwise check regular voice
+    const voiceToUse = voiceCloningEnabled && selectedProvider === 'coqui'
+      ? selectedCustomVoice
+      : selectedVoice
+
+    if (!window.electronAPI || !voiceToUse || isPreviewing) return
 
     if (previewAudio) {
       previewAudio.pause()
@@ -483,7 +522,12 @@ function App() {
         options.timeStretch = timeStretch[0]
       }
 
-      const result = await window.electronAPI.previewVoice(previewText, selectedVoice, options)
+      // Add custom voice ID for voice cloning
+      if (voiceCloningEnabled && selectedProvider === 'coqui' && selectedCustomVoice) {
+        options.customVoiceId = selectedCustomVoice
+      }
+
+      const result = await window.electronAPI.previewVoice(previewText, voiceToUse, options)
 
       if (previewAbortedRef.current) return
 
@@ -528,6 +572,39 @@ function App() {
       setPreviewAudio(null)
     }
     setIsPreviewing(false)
+  }
+
+  // ==================== CUSTOM VOICE HANDLERS ====================
+  const handleAddCustomVoice = () => {
+    setEditingCustomVoice(null)
+    setShowCustomVoiceModal(true)
+  }
+
+  const handleEditCustomVoice = (voice: CustomVoiceMetadata) => {
+    setEditingCustomVoice(voice)
+    setShowCustomVoiceModal(true)
+  }
+
+  const handleCustomVoiceSaved = (voice: CustomVoiceMetadata) => {
+    setCustomVoices(prev => {
+      const exists = prev.find(v => v.id === voice.id)
+      if (exists) {
+        return prev.map(v => v.id === voice.id ? voice : v)
+      }
+      return [...prev, voice]
+    })
+    setSelectedCustomVoice(voice.id)
+    setShowCustomVoiceModal(false)
+    setEditingCustomVoice(null)
+  }
+
+  const handleCustomVoiceDeleted = (voiceId: string) => {
+    setCustomVoices(prev => prev.filter(v => v.id !== voiceId))
+    if (selectedCustomVoice === voiceId) {
+      setSelectedCustomVoice('')
+    }
+    setShowCustomVoiceModal(false)
+    setEditingCustomVoice(null)
   }
 
   const handleLoadModel = async (engine: 'silero' | 'coqui', language?: string) => {
@@ -1037,6 +1114,13 @@ function App() {
                       onInstallRHVoice={handleInstallRHVoiceVoice}
                       settingsOpen={settingsOpen}
                       onSettingsOpenChange={setSettingsOpen}
+                      voiceCloningEnabled={voiceCloningEnabled}
+                      onVoiceCloningChange={setVoiceCloningEnabled}
+                      customVoices={customVoices}
+                      selectedCustomVoice={selectedCustomVoice}
+                      onCustomVoiceChange={setSelectedCustomVoice}
+                      onAddCustomVoice={handleAddCustomVoice}
+                      onEditCustomVoice={handleEditCustomVoice}
                       settingsContent={
                         <PlaybackSettingsContent
                           speed={speed}
@@ -1152,6 +1236,18 @@ function App() {
             }}
           />
         )}
+
+        {/* Custom Voice Modal */}
+        <CustomVoiceModal
+          isOpen={showCustomVoiceModal}
+          onClose={() => {
+            setShowCustomVoiceModal(false)
+            setEditingCustomVoice(null)
+          }}
+          onVoiceSaved={handleCustomVoiceSaved}
+          onVoiceDeleted={handleCustomVoiceDeleted}
+          editingVoice={editingCustomVoice}
+        />
 
         {/* Update Modal */}
         {showUpdateModal && updateInfo && (

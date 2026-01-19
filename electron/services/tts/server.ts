@@ -355,7 +355,8 @@ export async function generateViaServer(
   outputPath: string,
   rate?: string | number,
   pitch?: number,
-  timeStretch?: number
+  timeStretch?: number,
+  speakerWav?: string
 ): Promise<void> {
   const body = JSON.stringify({
     engine,
@@ -364,7 +365,8 @@ export async function generateViaServer(
     language,
     rate,
     pitch,
-    time_stretch: timeStretch
+    time_stretch: timeStretch,
+    speaker_wav: speakerWav
   })
 
   // Coqui XTTS is much slower, use 3x timeout (6 minutes instead of 2)
@@ -389,7 +391,8 @@ export async function generateViaServerForPreview(
   outputPath: string,
   rate?: string | number,
   pitch?: number,
-  timeStretch?: number
+  timeStretch?: number,
+  speakerWav?: string
 ): Promise<void> {
   const body = JSON.stringify({
     engine,
@@ -398,7 +401,8 @@ export async function generateViaServerForPreview(
     language,
     rate,
     pitch,
-    time_stretch: timeStretch
+    time_stretch: timeStretch,
+    speaker_wav: speakerWav
   })
 
   const audioBuffer = await httpRequestBinaryForPreview(`${TTS_SERVER_URL}/generate`, 'POST', body)

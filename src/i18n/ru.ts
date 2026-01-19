@@ -25,6 +25,7 @@ export const ru: Translations = {
     pleaseWait: 'Подождите...',
     startWork: 'Начать работу',
     downloadAndInstall: 'Загрузить и установить',
+    apply: 'Применить',
   },
 
   // Title bar
@@ -345,5 +346,32 @@ export const ru: Translations = {
   installation: {
     inProgress: 'Идёт установка',
     doNotClose: 'Пожалуйста, не закрывайте приложение до завершения установки.',
+  },
+
+  // Voice cloning
+  voiceCloning: {
+    toggle: 'Клонирование голоса',
+    addVoice: 'Добавить голос',
+    editVoice: 'Редактировать голос',
+    voiceName: 'Название голоса',
+    voiceNamePlaceholder: 'Введите название',
+    selectFile: 'Выберите аудиофайл',
+    dropFile: 'Перетащите файл сюда или нажмите для выбора',
+    requirements: 'Требования к аудио',
+    formats: 'Форматы: MP3, WAV, OGG, FLAC, M4A, AAC, WMA, AIFF, AMR',
+    maxSize: 'Макс. размер: 10 МБ',
+    duration: 'Длительность: 10-60 секунд',
+    validating: 'Проверка...',
+    valid: 'Файл корректен',
+    invalidDuration: 'Длительность должна быть 10-60 секунд',
+    invalidFormat: 'Неподдерживаемый формат',
+    fileTooLarge: 'Файл должен быть менее 10 МБ',
+    replaceAudio: 'Заменить аудио',
+    deleteVoice: 'Удалить голос',
+    deleteConfirm: 'Удалить этот голос?',
+    noVoices: 'Нет пользовательских голосов',
+    errorAdding: 'Не удалось добавить голос',
+    errorUpdating: 'Не удалось обновить голос',
+    errorDeleting: 'Не удалось удалить голос',
   },
 };

@@ -25,6 +25,7 @@ export interface Translations {
     pleaseWait: string;
     startWork: string;
     downloadAndInstall: string;
+    apply: string;
   };
 
   // Title bar
@@ -345,6 +346,33 @@ export interface Translations {
   installation: {
     inProgress: string;
     doNotClose: string;
+  };
+
+  // Voice Cloning
+  voiceCloning: {
+    toggle: string;
+    addVoice: string;
+    editVoice: string;
+    voiceName: string;
+    voiceNamePlaceholder: string;
+    selectFile: string;
+    dropFile: string;
+    requirements: string;
+    formats: string;
+    maxSize: string;
+    duration: string;
+    validating: string;
+    valid: string;
+    invalidDuration: string;
+    invalidFormat: string;
+    fileTooLarge: string;
+    replaceAudio: string;
+    deleteVoice: string;
+    deleteConfirm: string;
+    noVoices: string;
+    errorAdding: string;
+    errorUpdating: string;
+    errorDeleting: string;
   };
 }
 

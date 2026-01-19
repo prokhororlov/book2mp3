@@ -27,6 +27,7 @@ import {
   COQUI_VOICES
 } from './voices'
 import { getElevenLabsApiKey } from './providers'
+import { getCustomVoiceAudioPath } from './customVoices'
 
 const execAsync = promisify(exec)
 
@@ -687,12 +688,13 @@ async function generateSpeechWithCoqui(
   text: string,
   speakerName: string,
   language: string,
-  outputPath: string
+  outputPath: string,
+  speakerWav?: string
 ): Promise<void> {
   // Try to use TTS server first
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
-    await generateViaServer('coqui', text, speakerName, language, outputPath)
+    await generateViaServer('coqui', text, speakerName, language, outputPath, undefined, undefined, undefined, speakerWav)
     return
   }
 
@@ -712,10 +714,16 @@ async function generateSpeechWithCoqui(
     const args = [
       coquiScript,
       '--text', text,
-      '--speaker', speakerName,
       '--language', language,
       '--output', outputPath
     ]
+
+    // Voice cloning mode: use speaker_wav instead of speaker name
+    if (speakerWav) {
+      args.push('--speaker_wav', speakerWav)
+    } else {
+      args.push('--speaker', speakerName)
+    }
 
     const coquiProcess = spawn(pythonExe, args)
     let stderr = ''
@@ -930,12 +938,13 @@ async function generateSpeechWithCoquiForPreview(
   text: string,
   speakerName: string,
   language: string,
-  outputPath: string
+  outputPath: string,
+  speakerWav?: string
 ): Promise<void> {
   // Try to use TTS server first (abortable via HTTP)
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
-    await generateViaServerForPreview('coqui', text, speakerName, language, outputPath)
+    await generateViaServerForPreview('coqui', text, speakerName, language, outputPath, undefined, undefined, undefined, speakerWav)
     return
   }
 
@@ -955,10 +964,16 @@ async function generateSpeechWithCoquiForPreview(
     const args = [
       coquiScript,
       '--text', text,
-      '--speaker', speakerName,
       '--language', language,
       '--output', outputPath
     ]
+
+    // Voice cloning mode: use speaker_wav instead of speaker name
+    if (speakerWav) {
+      args.push('--speaker_wav', speakerWav)
+    } else {
+      args.push('--speaker', speakerName)
+    }
 
     const coquiProcess = spawn(pythonExe, args)
     currentPreviewProcess = coquiProcess
@@ -1078,7 +1093,7 @@ async function generateChunkAudio(
   chunk: string,
   outputFile: string,
   voiceInfo: VoiceInfo,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number }
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string }
 ): Promise<void> {
   switch (voiceInfo.provider) {
     case 'rhvoice':
@@ -1107,10 +1122,11 @@ async function generateChunkAudio(
       break
 
     case 'coqui':
-      if (!voiceInfo.modelPath) {
-        throw new Error('Speaker name required for Coqui')
+      // Voice cloning mode: speakerWav takes precedence over modelPath
+      if (!options.speakerWav && !voiceInfo.modelPath) {
+        throw new Error('Speaker name or custom voice required for Coqui')
       }
-      await generateSpeechWithCoqui(chunk, voiceInfo.modelPath, voiceInfo.locale, outputFile)
+      await generateSpeechWithCoqui(chunk, voiceInfo.modelPath || '', voiceInfo.locale, outputFile, options.speakerWav)
       break
 
     default:
@@ -1170,7 +1186,7 @@ async function processChunkWithSplit(
   tempDir: string,
   maxRetries: number,
   retryDelay: number,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number },
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string },
   maxSplitDepth: number = 3
 ): Promise<{ success: boolean; files: string[]; error?: string }> {
   const tempFile = path.join(tempDir, `chunk_${baseIndex}.wav`)
@@ -1250,7 +1266,7 @@ async function processChunk(
   tempDir: string,
   maxRetries: number,
   retryDelay: number,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number }
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string }
 ): Promise<{ success: boolean; file?: string; files?: string[]; error?: string }> {
   const result = await processChunkWithSplit(
     chunk,
@@ -1385,7 +1401,7 @@ export async function convertToSpeech(
   text: string,
   voiceShortName: string,
   outputPath: string,
-  options: { rate?: string; volume?: string; sentencePause?: number; pitch?: number; timeStretch?: number } = {},
+  options: { rate?: string; volume?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string } = {},
   onProgress?: (progress: number, status: string) => void,
   isAborted?: () => boolean
 ): Promise<void> {
@@ -1401,8 +1417,29 @@ export async function convertToSpeech(
 
   voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
 
+  // For custom voice cloning, we don't need a predefined voice
+  // Create a virtual voiceInfo for Coqui with custom voice
+  if (!voiceInfo && options.customVoiceId) {
+    voiceInfo = {
+      name: 'Custom Voice',
+      shortName: 'custom-voice',
+      gender: 'Male' as const,
+      locale: 'en', // Will be overridden by actual language selection
+      provider: 'coqui' as const
+    }
+  }
+
   if (!voiceInfo) {
     throw new Error(`Voice not found: ${voiceShortName}`)
+  }
+
+  // Get custom voice audio path if using voice cloning
+  let speakerWav: string | undefined
+  if (options.customVoiceId && voiceInfo.provider === 'coqui') {
+    speakerWav = getCustomVoiceAudioPath(options.customVoiceId)
+    if (!fs.existsSync(speakerWav)) {
+      throw new Error('Custom voice audio file not found')
+    }
   }
 
   // Silero and Coqui have token limits in the positional encoder.
@@ -1481,7 +1518,7 @@ export async function convertToSpeech(
         tempDir,
         maxRetries,
         retryDelay,
-        options
+        { ...options, speakerWav }
       )
 
       if (result.success && result.files && result.files.length > 0) {
@@ -1633,7 +1670,7 @@ export async function convertToSpeech(
 export async function previewVoice(
   text: string,
   voiceShortName: string,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number } = {}
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string } = {}
 ): Promise<{ success: boolean; audioData?: string; error?: string }> {
   // Reset abort state
   previewAborted = false
@@ -1649,10 +1686,30 @@ export async function previewVoice(
     ...Object.values(COQUI_VOICES).flat()
   ]
 
-  const voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
+  let voiceInfo = allVoices.find(v => v.shortName === voiceShortName)
+
+  // For custom voice cloning, create a virtual voiceInfo for Coqui
+  if (!voiceInfo && options.customVoiceId) {
+    voiceInfo = {
+      name: 'Custom Voice',
+      shortName: 'custom-voice',
+      gender: 'Male' as const,
+      locale: 'en',
+      provider: 'coqui' as const
+    }
+  }
 
   if (!voiceInfo) {
     return { success: false, error: `Voice not found: ${voiceShortName}` }
+  }
+
+  // Get custom voice audio path if using voice cloning
+  let speakerWav: string | undefined
+  if (options.customVoiceId && voiceInfo.provider === 'coqui') {
+    speakerWav = getCustomVoiceAudioPath(options.customVoiceId)
+    if (!fs.existsSync(speakerWav)) {
+      return { success: false, error: 'Custom voice audio file not found' }
+    }
   }
 
   // Use a temp directory for preview files
@@ -1703,10 +1760,11 @@ export async function previewVoice(
         break
 
       case 'coqui':
-        if (!voiceInfo.modelPath) {
-          return { success: false, error: 'Speaker name required for Coqui' }
+        // Voice cloning mode: speakerWav takes precedence
+        if (!speakerWav && !voiceInfo.modelPath) {
+          return { success: false, error: 'Speaker name or custom voice required for Coqui' }
         }
-        await generateSpeechWithCoquiForPreview(processedText, voiceInfo.modelPath, voiceInfo.locale, tempWavFile)
+        await generateSpeechWithCoquiForPreview(processedText, voiceInfo.modelPath || '', voiceInfo.locale, tempWavFile, speakerWav)
         break
 
       default:
