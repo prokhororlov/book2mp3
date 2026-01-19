@@ -10,8 +10,10 @@ Convert e-books (FB2, EPUB, TXT) to MP3 audiobooks using various Text-to-Speech 
 - **60+ voices** - Multiple voices in Russian and English
 - **Format support** - FB2, EPUB, TXT
 - **Speed control** - from 0.5x to 2.0x
-- **Dark theme** - light/dark/system theme support
+- **Multiple themes** - Light/dark/system theme support
+- **Multi-language UI** - English and Russian interface
 - **Auto-splitting** - large books split into parts
+- **GPU acceleration** - CUDA support for faster generation
 
 ## TTS Providers
 
@@ -195,15 +197,22 @@ npm run package
 ```
 voicecraft/
 ├── electron/               # Electron main process
-│   ├── main.ts            # Main process
-│   ├── preload.ts         # Preload script
+│   ├── main.ts            # Main process entry point
+│   ├── preload.ts         # IPC bridge (preload script)
+│   ├── main/
+│   │   ├── window.ts      # Window management
+│   │   └── handlers/      # IPC handlers
 │   └── services/
 │       ├── parser.ts      # Book parsing
-│       ├── setup.ts       # TTS setup service
-│       └── tts.ts         # Unified TTS service
+│       ├── setup/         # Dependency installation
+│       └── tts/           # TTS services
 ├── src/                   # React frontend
 │   ├── App.tsx           # Main component
-│   └── components/       # UI components
+│   ├── i18n/             # Internationalization (EN/RU)
+│   ├── components/       # UI components
+│   ├── hooks/            # React hooks
+│   ├── fsm/              # State machine
+│   └── utils/            # Utility functions
 ├── tts_resources/        # TTS resources
 │   ├── piper/           # Piper TTS
 │   ├── silero/          # Silero TTS
@@ -213,8 +222,7 @@ voicecraft/
 ├── scripts/
 │   ├── setup-all.ps1    # Universal setup
 │   ├── setup-silero.ps1 # Setup only Silero
-│   ├── release.cjs      # Release automation
-│   └── silero_generate.py # Python script for Silero
+│   └── release.cjs      # Release automation
 └── .env                 # Environment variables (API keys)
 ```
 

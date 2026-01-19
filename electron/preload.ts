@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+// ============================================================================
+// Types
+// ============================================================================
+
 export interface FileInfo {
   name: string
   extension: string
@@ -69,20 +73,18 @@ export interface RHVoiceUrls {
   }
 }
 
-// GPU Accelerator types
 export interface GPUInfo {
   available: boolean
   name?: string
-  vram?: number  // in MB
+  vram?: number
 }
 
 export interface AvailableAccelerators {
   cpu: true
   cuda: GPUInfo
-  xpu: GPUInfo
 }
 
-export type AcceleratorType = 'cpu' | 'cuda' | 'xpu'
+export type AcceleratorType = 'cpu' | 'cuda'
 
 export interface AcceleratorConfig {
   accelerator: AcceleratorType
@@ -96,7 +98,6 @@ export interface ReinstallProgress {
   progress?: number
 }
 
-// Update types
 export interface ReleaseInfo {
   version: string
   releaseDate: string
@@ -119,8 +120,12 @@ export interface DownloadProgress {
   total: number
 }
 
+// ============================================================================
+// API
+// ============================================================================
 
 const electronAPI = {
+  // File API
   openFileDialog: (): Promise<string | null> =>
     ipcRenderer.invoke('open-file-dialog'),
 
@@ -130,6 +135,10 @@ const electronAPI = {
   parseBook: (filePath: string): Promise<{ success: boolean; content?: BookContent; error?: string }> =>
     ipcRenderer.invoke('parse-book', filePath),
 
+  getFileInfo: (filePath: string): Promise<{ success: boolean; info?: FileInfo; error?: string }> =>
+    ipcRenderer.invoke('get-file-info', filePath),
+
+  // TTS API
   getVoices: (language: string): Promise<VoiceInfo[]> =>
     ipcRenderer.invoke('get-voices', language).then(result => result.voices || []),
 
@@ -147,9 +156,6 @@ const electronAPI = {
   abortConversion: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('abort-conversion'),
 
-  getFileInfo: (filePath: string): Promise<{ success: boolean; info?: FileInfo; error?: string }> =>
-    ipcRenderer.invoke('get-file-info', filePath),
-
   previewVoice: (text: string, voiceShortName: string, options?: Record<string, unknown>): Promise<{ success: boolean; audioData?: string; error?: string }> =>
     ipcRenderer.invoke('preview-voice', text, voiceShortName, options || {}),
 
@@ -162,114 +168,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('conversion-progress', handler)
   },
 
-  // Setup/dependency management
-  checkDependencies: (): Promise<DependencyStatus> =>
-    ipcRenderer.invoke('check-dependencies'),
-
-  checkDependenciesAsync: (): Promise<DependencyStatus> =>
-    ipcRenderer.invoke('check-dependencies-async'),
-
-  checkPythonAvailable: (): Promise<boolean> =>
-    ipcRenderer.invoke('check-python-available'),
-
-  // Embedded Python management
-  installEmbeddedPython: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-embedded-python'),
-
-  checkEmbeddedPython: (): Promise<boolean> =>
-    ipcRenderer.invoke('check-embedded-python'),
-
-  getPythonInfo: (): Promise<{ available: boolean; path: string | null; isEmbedded: boolean; version: string | null }> =>
-    ipcRenderer.invoke('get-python-info'),
-
-  installSilero: (accelerator: AcceleratorType = 'cpu'): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-silero', accelerator),
-
-  installCoqui: (accelerator: AcceleratorType = 'cpu'): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> =>
-    ipcRenderer.invoke('install-coqui', accelerator),
-
-  checkBuildTools: (): Promise<boolean> =>
-    ipcRenderer.invoke('check-build-tools'),
-
-  installBuildTools: (): Promise<{ success: boolean; error?: string; requiresRestart?: boolean }> =>
-    ipcRenderer.invoke('install-build-tools'),
-
-  installPiper: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-piper'),
-
-  installFfmpeg: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-ffmpeg'),
-
-  // GPU Accelerator management
-  getAvailableAccelerators: (): Promise<AvailableAccelerators> =>
-    ipcRenderer.invoke('get-available-accelerators'),
-
-  getCurrentSileroAccelerator: (): Promise<AcceleratorConfig | null> =>
-    ipcRenderer.invoke('get-current-silero-accelerator'),
-
-  getCurrentCoquiAccelerator: (): Promise<AcceleratorConfig | null> =>
-    ipcRenderer.invoke('get-current-coqui-accelerator'),
-
-  reinstallSileroWithAccelerator: (accelerator: AcceleratorType): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('reinstall-silero-with-accelerator', accelerator),
-
-  reinstallCoquiWithAccelerator: (accelerator: AcceleratorType): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('reinstall-coqui-with-accelerator', accelerator),
-
-  onReinstallProgress: (callback: (data: ReinstallProgress) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: ReinstallProgress) => callback(data)
-    ipcRenderer.on('reinstall-progress', handler)
-    return () => ipcRenderer.removeListener('reinstall-progress', handler)
+  onModelLoadProgress: (callback: (data: { progress: number; engine: string; language?: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { progress: number; engine: string; language?: string }) => callback(data)
+    ipcRenderer.on('model-load-progress', handler)
+    return () => ipcRenderer.removeListener('model-load-progress', handler)
   },
 
-  installPiperVoice: (lang: 'ru_RU' | 'en_US', voiceName: string, quality: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-piper-voice', lang, voiceName, quality),
-
-  // RHVoice management
-  installRHVoiceCore: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-rhvoice-core'),
-
-  installRHVoice: (voiceName: string, language: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('install-rhvoice', voiceName, language),
-
-  getInstalledRHVoices: (): Promise<string[]> =>
-    ipcRenderer.invoke('get-installed-rhvoices'),
-
-  getAvailableRHVoices: (language: string): Promise<RHVoiceInfo[]> =>
-    ipcRenderer.invoke('get-available-rhvoices', language),
-
-  getRHVoiceUrls: (): Promise<RHVoiceUrls> =>
-    ipcRenderer.invoke('get-rhvoice-urls'),
-
-  needsSetup: (): Promise<boolean> =>
-    ipcRenderer.invoke('needs-setup'),
-
-  runSetup: (options?: {
-    installPiper?: boolean
-    installFfmpeg?: boolean
-    installRussianVoices?: boolean
-    installEnglishVoices?: boolean
-    installSilero?: boolean
-  }): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('run-setup', options),
-
-  getEstimatedDownloadSize: (): Promise<{ size: number; includeSilero: boolean }> =>
-    ipcRenderer.invoke('get-estimated-download-size'),
-
-  // ElevenLabs API key management
-  getElevenLabsApiKey: (): Promise<string | null> =>
-    ipcRenderer.invoke('get-elevenlabs-api-key'),
-
-  setElevenLabsApiKey: (apiKey: string): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke('set-elevenlabs-api-key', apiKey),
-
-  onSetupProgress: (callback: (data: SetupProgress) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: SetupProgress) => callback(data)
-    ipcRenderer.on('setup-progress', handler)
-    return () => ipcRenderer.removeListener('setup-progress', handler)
-  },
-
-  // TTS Server management
   ttsServerStart: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('tts-server-start'),
 
@@ -303,7 +207,125 @@ const electronAPI = {
   ttsSetDevice: (device: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('tts-set-device', device),
 
-  // Update management
+  // Setup API
+  checkDependencies: (): Promise<DependencyStatus> =>
+    ipcRenderer.invoke('check-dependencies'),
+
+  checkDependenciesAsync: (): Promise<DependencyStatus> =>
+    ipcRenderer.invoke('check-dependencies-async'),
+
+  checkPythonAvailable: (): Promise<boolean> =>
+    ipcRenderer.invoke('check-python-available'),
+
+  installEmbeddedPython: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-embedded-python'),
+
+  checkEmbeddedPython: (): Promise<boolean> =>
+    ipcRenderer.invoke('check-embedded-python'),
+
+  getPythonInfo: (): Promise<{ available: boolean; path: string | null; isEmbedded: boolean; version: string | null }> =>
+    ipcRenderer.invoke('get-python-info'),
+
+  installSilero: (accelerator: AcceleratorType = 'cpu'): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-silero', accelerator),
+
+  installCoqui: (accelerator: AcceleratorType = 'cpu'): Promise<{ success: boolean; error?: string; needsBuildTools?: boolean }> =>
+    ipcRenderer.invoke('install-coqui', accelerator),
+
+  checkBuildTools: (): Promise<boolean> =>
+    ipcRenderer.invoke('check-build-tools'),
+
+  installBuildTools: (): Promise<{ success: boolean; error?: string; requiresRestart?: boolean }> =>
+    ipcRenderer.invoke('install-build-tools'),
+
+  installPiper: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-piper'),
+
+  installFfmpeg: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-ffmpeg'),
+
+  getAvailableAccelerators: (): Promise<AvailableAccelerators> =>
+    ipcRenderer.invoke('get-available-accelerators'),
+
+  getCurrentSileroAccelerator: (): Promise<AcceleratorConfig | null> =>
+    ipcRenderer.invoke('get-current-silero-accelerator'),
+
+  getCurrentCoquiAccelerator: (): Promise<AcceleratorConfig | null> =>
+    ipcRenderer.invoke('get-current-coqui-accelerator'),
+
+  reinstallSileroWithAccelerator: (accelerator: AcceleratorType): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('reinstall-silero-with-accelerator', accelerator),
+
+  reinstallCoquiWithAccelerator: (accelerator: AcceleratorType): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('reinstall-coqui-with-accelerator', accelerator),
+
+  onReinstallProgress: (callback: (data: ReinstallProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: ReinstallProgress) => callback(data)
+    ipcRenderer.on('reinstall-progress', handler)
+    return () => ipcRenderer.removeListener('reinstall-progress', handler)
+  },
+
+  installPiperVoice: (lang: 'ru_RU' | 'en_US', voiceName: string, quality: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-piper-voice', lang, voiceName, quality),
+
+  installRHVoiceCore: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-rhvoice-core'),
+
+  installRHVoice: (voiceName: string, language: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('install-rhvoice', voiceName, language),
+
+  getInstalledRHVoices: (): Promise<string[]> =>
+    ipcRenderer.invoke('get-installed-rhvoices'),
+
+  getAvailableRHVoices: (language: string): Promise<RHVoiceInfo[]> =>
+    ipcRenderer.invoke('get-available-rhvoices', language),
+
+  getRHVoiceUrls: (): Promise<RHVoiceUrls> =>
+    ipcRenderer.invoke('get-rhvoice-urls'),
+
+  needsSetup: (): Promise<boolean> =>
+    ipcRenderer.invoke('needs-setup'),
+
+  runSetup: (options?: {
+    installPiper?: boolean
+    installFfmpeg?: boolean
+    installRussianVoices?: boolean
+    installEnglishVoices?: boolean
+    installSilero?: boolean
+  }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('run-setup', options),
+
+  getEstimatedDownloadSize: (): Promise<{ size: number; includeSilero: boolean }> =>
+    ipcRenderer.invoke('get-estimated-download-size'),
+
+  checkGPUToolkit: (accelerator: 'cpu' | 'cuda'): Promise<{
+    available: boolean
+    error?: string
+    message?: string
+    downloadUrl?: string
+  }> =>
+    ipcRenderer.invoke('check-gpu-toolkit', accelerator),
+
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke('open-external', url),
+
+  onSetupProgress: (callback: (data: SetupProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: SetupProgress) => callback(data)
+    ipcRenderer.on('setup-progress', handler)
+    return () => ipcRenderer.removeListener('setup-progress', handler)
+  },
+
+  // Settings API
+  getSystemLocale: (): Promise<string> =>
+    ipcRenderer.invoke('get-system-locale'),
+
+  getElevenLabsApiKey: (): Promise<string | null> =>
+    ipcRenderer.invoke('get-elevenlabs-api-key'),
+
+  setElevenLabsApiKey: (apiKey: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('set-elevenlabs-api-key', apiKey),
+
+  // Updates API
   checkForUpdates: (): Promise<UpdateCheckResult> =>
     ipcRenderer.invoke('check-for-updates'),
 
@@ -319,7 +341,7 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('update-download-progress', handler)
   },
 
-  // Window controls for custom titlebar
+  // Window API
   windowMinimize: (): Promise<void> =>
     ipcRenderer.invoke('window-minimize'),
 
@@ -339,8 +361,10 @@ const electronAPI = {
   },
 }
 
+// Expose the API to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)
 
+// Type declaration for renderer process
 declare global {
   interface Window {
     electronAPI: typeof electronAPI

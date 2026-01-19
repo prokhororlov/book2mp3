@@ -53,10 +53,30 @@
 @layer base {
   * {
     @apply border-border;
+    user-select: none;
+  }
+  html, body {
+    @apply bg-background text-foreground;
+    overflow: hidden;
   }
   body {
-    @apply bg-background text-foreground;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  #root {
+    height: 100vh;
+    width: 100vw;
+  }
+  /* Allow text selection in input fields */
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  textarea,
+  [contenteditable="true"] {
+    user-select: text;
   }
 }
 
@@ -83,4 +103,32 @@
 /* Drag and drop zone styles */
 .dropzone-active {
   @apply border-primary bg-accent;
+}
+
+/* Remove focus outline on mouse interaction, keep it for keyboard navigation */
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Cursor styles for interactive elements */
+input[type="radio"],
+input[type="checkbox"] {
+  cursor: pointer;
+}
+
+input[type="radio"]:disabled,
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  cursor: pointer;
+}
+
+summary {
+  cursor: pointer;
 }

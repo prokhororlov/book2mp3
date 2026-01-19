@@ -1,0 +1,188 @@
+import { Wand2, Download, Cpu, Zap, AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import type { AcceleratorInfo } from '@/types'
+import { useI18n } from '@/i18n'
+
+interface CoquiSetupProps {
+  isInstalling: boolean
+  installProgress: string
+  installPercent: number
+  pythonAvailable: boolean
+  buildToolsAvailable: boolean
+  availableAccelerators: AcceleratorInfo | null
+  selectedAccelerator: 'cpu' | 'cuda'
+  onAcceleratorChange: (accelerator: 'cpu' | 'cuda') => void
+  onInstall: () => void
+  onRefreshAccelerators: () => void
+  onOpenExternal: (url: string) => void
+}
+
+export function CoquiSetup({
+  isInstalling,
+  installProgress,
+  installPercent,
+  pythonAvailable,
+  buildToolsAvailable,
+  availableAccelerators,
+  selectedAccelerator,
+  onAcceleratorChange,
+  onInstall,
+  onRefreshAccelerators,
+  onOpenExternal,
+}: CoquiSetupProps) {
+  const { t } = useI18n()
+  const isCudaDisabled = selectedAccelerator === 'cuda' && availableAccelerators?.cuda.toolkitMissing
+
+  const getTotalSize = () => {
+    let size = selectedAccelerator === 'cuda' ? 4.6 : 2.5
+    if (!buildToolsAvailable) size += 7
+    return size.toFixed(1)
+  }
+
+  return (
+    <div className="space-y-3 p-4 border rounded-md bg-muted/50">
+      <div className="flex items-center gap-2">
+        <Wand2 className="h-4 w-4 text-primary" />
+        <span className="font-medium text-sm">{t.providers.coqui.setupRequired}</span>
+      </div>
+      {isInstalling ? (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">
+                {installProgress || t.setup.installing}
+              </span>
+              <span className="font-medium">{installPercent}%</span>
+            </div>
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300 ease-out"
+                style={{ width: `${installPercent}%` }}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t.providers.coqui.waitMinutes}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-sm text-muted-foreground space-y-1">
+            <p>{t.providers.coqui.forCoquiWork}</p>
+            <ul className="list-disc list-inside text-xs space-y-0.5 ml-1">
+              {!buildToolsAvailable && (
+                <li className="text-yellow-500">
+                  {t.providers.coqui.buildTools}
+                </li>
+              )}
+              {!pythonAvailable && <li>{t.providers.silero.pythonEmbedded}</li>}
+              <li>
+                PyTorch {selectedAccelerator === 'cuda' ? 'CUDA' : 'CPU'} — ~
+                {selectedAccelerator === 'cuda' ? '2.3 GB' : '200 MB'}
+              </li>
+              <li>{t.providers.coqui.coquiLibrary}</li>
+              <li>{t.providers.coqui.xttsModel}</li>
+            </ul>
+          </div>
+
+          {availableAccelerators?.cuda.name && (
+            <div className="p-3 rounded-md border border-primary/30 bg-primary/5 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                <Zap className="h-4 w-4" />
+                <span>{t.gpu.gpuDetected}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t.gpu.coquiSpeedup}
+              </p>
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="radio"
+                    name="coquiAccelerator"
+                    checked={selectedAccelerator === 'cpu'}
+                    onChange={() => onAcceleratorChange('cpu')}
+                    className="text-primary"
+                  />
+                  <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>{t.gpu.cpuMode} (~200 MB) — {t.providers.coqui.slowGeneration}</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="radio"
+                    name="coquiAccelerator"
+                    checked={selectedAccelerator === 'cuda'}
+                    onChange={() => onAcceleratorChange('cuda')}
+                    className="text-primary"
+                  />
+                  <Zap className="h-3.5 w-3.5 text-green-500" />
+                  <span>{t.gpu.cudaMode} (~2.3 GB) — {t.gpu.cudaModeDescription}</span>
+                  <span className="text-muted-foreground">
+                    ({availableAccelerators.cuda.name})
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {isCudaDisabled && (
+            <div className="p-3 rounded-md border border-amber-500/30 bg-amber-500/5 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                <span>{t.gpu.toolkitRequired}</span>
+              </div>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <div className="space-y-1.5">
+                  <p className="font-medium text-foreground">
+                    {availableAccelerators?.cuda.toolkitMessage}
+                  </p>
+                  <p>
+                    {t.reinstall.cudaRequired}
+                  </p>
+                  {availableAccelerators?.cuda.toolkitUrl && (
+                    <button
+                      onClick={() =>
+                        onOpenExternal(availableAccelerators.cuda.toolkitUrl!)
+                      }
+                      className="inline-flex items-center gap-1 text-primary hover:underline cursor-pointer text-xs"
+                    >
+                      {t.toolkit.downloadCuda}
+                      <ExternalLink className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] mt-2">
+                  {t.toolkit.afterInstall}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRefreshAccelerators}
+                className="w-full text-xs"
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                {t.common.refresh}
+              </Button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {t.providers.coqui.totalDownload}: ~{getTotalSize()} GB
+              {!buildToolsAvailable && ` ${t.providers.coqui.includesBuildTools}`}
+            </span>
+            <Button
+              variant="default"
+              size="sm"
+              disabled={isCudaDisabled}
+              onClick={onInstall}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {t.common.install} Coqui
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
