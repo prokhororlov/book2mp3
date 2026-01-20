@@ -45,7 +45,7 @@ export function registerTTSHandlers() {
     text: string,
     voice: string,
     outputPath: string,
-    options: { rate?: string; volume?: string }
+    options: { rate?: string; volume?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string; useRuaccent?: boolean }
   ) => {
     conversionAborted = false
 
@@ -89,7 +89,7 @@ export function registerTTSHandlers() {
   })
 
   ipcMain.handle('preview-voice', async (_event, text: string, voiceShortName: string, options: Record<string, unknown> = {}) => {
-    return await previewVoice(text, voiceShortName, options as { rate?: string; sentencePause?: number })
+    return await previewVoice(text, voiceShortName, options as { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string; useRuaccent?: boolean })
   })
 
   ipcMain.handle('abort-preview', () => {

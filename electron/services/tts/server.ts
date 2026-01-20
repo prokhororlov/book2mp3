@@ -296,7 +296,8 @@ export async function loadTTSModel(
     }
 
     const body = JSON.stringify({ engine, language })
-    const response = await httpRequest(`${TTS_SERVER_URL}/load`, 'POST', body)
+    // Use longer timeout for model loading (5 minutes) - Coqui + ruaccent can take a while
+    const response = await httpRequestWithTimeout(`${TTS_SERVER_URL}/load`, 'POST', body, 300000)
     const data = JSON.parse(response)
 
     return {
@@ -356,7 +357,8 @@ export async function generateViaServer(
   rate?: string | number,
   pitch?: number,
   timeStretch?: number,
-  speakerWav?: string
+  speakerWav?: string,
+  useRuaccent?: boolean
 ): Promise<void> {
   const body = JSON.stringify({
     engine,
@@ -366,7 +368,8 @@ export async function generateViaServer(
     rate,
     pitch,
     time_stretch: timeStretch,
-    speaker_wav: speakerWav
+    speaker_wav: speakerWav,
+    use_ruaccent: useRuaccent
   })
 
   // Coqui XTTS is much slower, use 3x timeout (6 minutes instead of 2)
@@ -392,7 +395,8 @@ export async function generateViaServerForPreview(
   rate?: string | number,
   pitch?: number,
   timeStretch?: number,
-  speakerWav?: string
+  speakerWav?: string,
+  useRuaccent?: boolean
 ): Promise<void> {
   const body = JSON.stringify({
     engine,
@@ -402,7 +406,8 @@ export async function generateViaServerForPreview(
     rate,
     pitch,
     time_stretch: timeStretch,
-    speaker_wav: speakerWav
+    speaker_wav: speakerWav,
+    use_ruaccent: useRuaccent
   })
 
   const audioBuffer = await httpRequestBinaryForPreview(`${TTS_SERVER_URL}/generate`, 'POST', body)
@@ -417,6 +422,10 @@ export async function generateViaServerForPreview(
 }
 
 export function httpRequest(url: string, method: string, body?: string): Promise<string> {
+  return httpRequestWithTimeout(url, method, body, 60000)
+}
+
+export function httpRequestWithTimeout(url: string, method: string, body?: string, timeout: number = 60000): Promise<string> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url)
     const options = {
@@ -443,7 +452,7 @@ export function httpRequest(url: string, method: string, body?: string): Promise
     })
 
     req.on('error', reject)
-    req.setTimeout(60000, () => {
+    req.setTimeout(timeout, () => {
       req.destroy()
       reject(new Error('Request timeout'))
     })

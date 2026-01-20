@@ -220,7 +220,8 @@ export function VoiceSelector({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-2 gap-4 pt-2 items-end">
+      {/* Language selector */}
       <div className="space-y-1.5">
         <Label className="text-sm">{t.voice.language}</Label>
         <Select
@@ -241,6 +242,7 @@ export function VoiceSelector({
         </Select>
       </div>
 
+      {/* Voice selector */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <Label className="text-sm">{t.voice.selectVoice}</Label>

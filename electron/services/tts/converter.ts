@@ -605,14 +605,14 @@ async function generateSpeechWithSilero(
   text: string,
   speakerPath: string,
   outputPath: string,
-  options: { rate?: string; pitch?: number; timeStretch?: number } = {}
+  options: { rate?: string; pitch?: number; timeStretch?: number; useRuaccent?: boolean } = {}
 ): Promise<void> {
   // Try to use TTS server first
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
     // Determine language from speaker path (e.g., "v5_ru/aidar" -> "ru")
     const language = speakerPath.includes('_ru') ? 'ru' : 'en'
-    await generateViaServer('silero', text, speakerPath, language, outputPath, options.rate, options.pitch, options.timeStretch)
+    await generateViaServer('silero', text, speakerPath, language, outputPath, options.rate, options.pitch, options.timeStretch, undefined, options.useRuaccent)
     return
   }
 
@@ -689,12 +689,13 @@ async function generateSpeechWithCoqui(
   speakerName: string,
   language: string,
   outputPath: string,
-  speakerWav?: string
+  speakerWav?: string,
+  useRuaccent?: boolean
 ): Promise<void> {
   // Try to use TTS server first
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
-    await generateViaServer('coqui', text, speakerName, language, outputPath, undefined, undefined, undefined, speakerWav)
+    await generateViaServer('coqui', text, speakerName, language, outputPath, undefined, undefined, undefined, speakerWav, useRuaccent)
     return
   }
 
@@ -858,13 +859,13 @@ async function generateSpeechWithSileroForPreview(
   text: string,
   speakerPath: string,
   outputPath: string,
-  options: { rate?: string; pitch?: number; timeStretch?: number } = {}
+  options: { rate?: string; pitch?: number; timeStretch?: number; useRuaccent?: boolean } = {}
 ): Promise<void> {
   // Try to use TTS server first (abortable via HTTP)
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
     const language = speakerPath.includes('_ru') ? 'ru' : 'en'
-    await generateViaServerForPreview('silero', text, speakerPath, language, outputPath, options.rate, options.pitch, options.timeStretch)
+    await generateViaServerForPreview('silero', text, speakerPath, language, outputPath, options.rate, options.pitch, options.timeStretch, undefined, options.useRuaccent)
     return
   }
 
@@ -939,12 +940,13 @@ async function generateSpeechWithCoquiForPreview(
   speakerName: string,
   language: string,
   outputPath: string,
-  speakerWav?: string
+  speakerWav?: string,
+  useRuaccent?: boolean
 ): Promise<void> {
   // Try to use TTS server first (abortable via HTTP)
   const serverStatus = await getTTSServerStatus()
   if (serverStatus.running) {
-    await generateViaServerForPreview('coqui', text, speakerName, language, outputPath, undefined, undefined, undefined, speakerWav)
+    await generateViaServerForPreview('coqui', text, speakerName, language, outputPath, undefined, undefined, undefined, speakerWav, useRuaccent)
     return
   }
 
@@ -1093,7 +1095,7 @@ async function generateChunkAudio(
   chunk: string,
   outputFile: string,
   voiceInfo: VoiceInfo,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string }
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string; useRuaccent?: boolean }
 ): Promise<void> {
   switch (voiceInfo.provider) {
     case 'rhvoice':
@@ -1111,7 +1113,7 @@ async function generateChunkAudio(
       if (!voiceInfo.modelPath) {
         throw new Error('Speaker path required for Silero')
       }
-      await generateSpeechWithSilero(chunk, voiceInfo.modelPath, outputFile, { rate: options.rate, pitch: options.pitch, timeStretch: options.timeStretch })
+      await generateSpeechWithSilero(chunk, voiceInfo.modelPath, outputFile, { rate: options.rate, pitch: options.pitch, timeStretch: options.timeStretch, useRuaccent: options.useRuaccent })
       break
 
     case 'elevenlabs':
@@ -1126,7 +1128,7 @@ async function generateChunkAudio(
       if (!options.speakerWav && !voiceInfo.modelPath) {
         throw new Error('Speaker name or custom voice required for Coqui')
       }
-      await generateSpeechWithCoqui(chunk, voiceInfo.modelPath || '', voiceInfo.locale, outputFile, options.speakerWav)
+      await generateSpeechWithCoqui(chunk, voiceInfo.modelPath || '', voiceInfo.locale, outputFile, options.speakerWav, options.useRuaccent)
       break
 
     default:
@@ -1186,7 +1188,7 @@ async function processChunkWithSplit(
   tempDir: string,
   maxRetries: number,
   retryDelay: number,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string },
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string; useRuaccent?: boolean },
   maxSplitDepth: number = 3
 ): Promise<{ success: boolean; files: string[]; error?: string }> {
   const tempFile = path.join(tempDir, `chunk_${baseIndex}.wav`)
@@ -1266,7 +1268,7 @@ async function processChunk(
   tempDir: string,
   maxRetries: number,
   retryDelay: number,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string }
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; speakerWav?: string; useRuaccent?: boolean }
 ): Promise<{ success: boolean; file?: string; files?: string[]; error?: string }> {
   const result = await processChunkWithSplit(
     chunk,
@@ -1401,7 +1403,7 @@ export async function convertToSpeech(
   text: string,
   voiceShortName: string,
   outputPath: string,
-  options: { rate?: string; volume?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string } = {},
+  options: { rate?: string; volume?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string; useRuaccent?: boolean } = {},
   onProgress?: (progress: number, status: string) => void,
   isAborted?: () => boolean
 ): Promise<void> {
@@ -1670,7 +1672,7 @@ export async function convertToSpeech(
 export async function previewVoice(
   text: string,
   voiceShortName: string,
-  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string } = {}
+  options: { rate?: string; sentencePause?: number; pitch?: number; timeStretch?: number; customVoiceId?: string; useRuaccent?: boolean } = {}
 ): Promise<{ success: boolean; audioData?: string; error?: string }> {
   // Reset abort state
   previewAborted = false
@@ -1749,7 +1751,7 @@ export async function previewVoice(
         if (!voiceInfo.modelPath) {
           return { success: false, error: 'Speaker path required for Silero' }
         }
-        await generateSpeechWithSileroForPreview(processedText, voiceInfo.modelPath, tempWavFile, { rate: options.rate, pitch: options.pitch, timeStretch: options.timeStretch })
+        await generateSpeechWithSileroForPreview(processedText, voiceInfo.modelPath, tempWavFile, { rate: options.rate, pitch: options.pitch, timeStretch: options.timeStretch, useRuaccent: options.useRuaccent })
         break
 
       case 'elevenlabs':
@@ -1764,7 +1766,7 @@ export async function previewVoice(
         if (!speakerWav && !voiceInfo.modelPath) {
           return { success: false, error: 'Speaker name or custom voice required for Coqui' }
         }
-        await generateSpeechWithCoquiForPreview(processedText, voiceInfo.modelPath || '', voiceInfo.locale, tempWavFile, speakerWav)
+        await generateSpeechWithCoquiForPreview(processedText, voiceInfo.modelPath || '', voiceInfo.locale, tempWavFile, speakerWav, options.useRuaccent)
         break
 
       default:

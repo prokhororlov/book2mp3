@@ -229,6 +229,7 @@ export interface Translations {
     convertToMp3: string;
     cancelled: string;
     audioSaved: string;
+    openFolder: string;
   };
 
   // Voice selector
@@ -273,6 +274,8 @@ export interface Translations {
     numbersToWords: string;
     sentencePause: string;
     previewTextLabel: string;
+    ruaccent: string;
+    ruaccentDescription: string;
   };
 
   // Updates

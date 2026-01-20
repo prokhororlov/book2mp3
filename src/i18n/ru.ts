@@ -229,6 +229,7 @@ export const ru: Translations = {
     convertToMp3: 'Конвертировать в MP3',
     cancelled: 'Конвертация отменена',
     audioSaved: 'Аудиофайл успешно сохранён!',
+    openFolder: 'Открыть папку',
   },
 
   // Voice selector
@@ -273,6 +274,8 @@ export const ru: Translations = {
     numbersToWords: 'Числа преобразуются в слова',
     sentencePause: 'Пауза между предложениями',
     previewTextLabel: 'Текст для превью',
+    ruaccent: 'Расстановка ударений',
+    ruaccentDescription: 'Автоматически расставлять ударения для улучшения произношения',
   },
 
   // Updates

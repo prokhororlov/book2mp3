@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Languages, Settings, Play, X, Download, Loader2, AlertTriangle } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Settings, Play, Loader2, AlertTriangle, FolderOpen } from 'lucide-react'
 
 import { SetupScreen } from '@/components/SetupScreen'
 import { TitleBar } from '@/components/TitleBar'
@@ -77,6 +77,7 @@ function App() {
   const [pitch, setPitch] = useState([1.0])
   const [timeStretch, setTimeStretch] = useState([1.0])
   const [sentencePause, setSentencePause] = useState([0.0])
+  const [ruaccentEnabled, setRuaccentEnabled] = useState(false)
   const [previewText, setPreviewText] = useState(() => getDefaultPreviewText('en'))
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -90,6 +91,7 @@ function App() {
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [lastOutputPath, setLastOutputPath] = useState<string | null>(null)
 
   // ==================== ELEVENLABS STATE ====================
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState<string>('')
@@ -460,6 +462,11 @@ function App() {
       options.timeStretch = timeStretch[0]
     }
 
+    // Add ruaccent option for Silero
+    if (selectedProvider === 'silero' && ruaccentEnabled) {
+      options.useRuaccent = true
+    }
+
     // Add custom voice ID for voice cloning
     if (voiceCloningEnabled && selectedProvider === 'coqui' && selectedCustomVoice) {
       options.customVoiceId = selectedCustomVoice
@@ -476,8 +483,10 @@ function App() {
 
     if (!result.success) {
       setError(result.error || 'Conversion failed')
+      setLastOutputPath(null)
     } else {
       setStatus(t.conversion.completed)
+      setLastOutputPath(outputPath)
     }
   }
 
@@ -520,6 +529,11 @@ function App() {
       }
       if (selectedProvider === 'silero' && timeStretch[0] !== 1.0) {
         options.timeStretch = timeStretch[0]
+      }
+
+      // Add ruaccent option for Silero
+      if (selectedProvider === 'silero' && ruaccentEnabled) {
+        options.useRuaccent = true
       }
 
       // Add custom voice ID for voice cloning
@@ -973,7 +987,7 @@ function App() {
       />
 
       <div className="flex-1 overflow-auto p-4">
-        <div className="max-w-4xl mx-auto space-y-4">
+        <div className={`max-w-4xl mx-auto ${!file ? 'h-full flex items-center justify-center' : 'space-y-4'}`}>
           {/* File Drop Zone */}
           <FileDropZone
             file={file}
@@ -987,13 +1001,7 @@ function App() {
           {/* Settings */}
           {file && bookContent && (
             <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Languages className="h-4 w-4" />
-                  {t.common.settings}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 pb-6">
+              <CardContent className="space-y-4 py-6">
                 {/* Provider Selection */}
                 <ProviderSelector
                   providers={availableProviders}
@@ -1131,6 +1139,8 @@ function App() {
                           onTimeStretchChange={setTimeStretch}
                           sentencePause={sentencePause}
                           onSentencePauseChange={setSentencePause}
+                          ruaccentEnabled={ruaccentEnabled}
+                          onRuaccentChange={setRuaccentEnabled}
                           previewText={previewText}
                           onPreviewTextChange={setPreviewText}
                           selectedProvider={selectedProvider}
@@ -1154,13 +1164,39 @@ function App() {
                     </div>
                   </div>
                 )}
+
+                {/* Action Buttons */}
+                {isProviderReady && !isConverting && (
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      onClick={handleConvert}
+                      disabled={!isModelLoadedForLanguage || !isSelectedVoiceValid}
+                      className="flex-1 h-12 text-base gap-2 border-primary/50 text-primary hover:bg-primary/10 hover:text-primary"
+                      title={!isModelLoadedForLanguage ? t.voice.loadModelFirst : ''}
+                    >
+                      <Play className="h-5 w-5" />
+                      {!isModelLoadedForLanguage ? t.conversion.loadModelToConvert : t.conversion.convertToMp3}
+                    </Button>
+                    {status === t.conversion.completed && lastOutputPath && (
+                      <Button
+                        variant="outline"
+                        className="h-12 gap-2 border-primary/50 text-primary hover:bg-primary/10 hover:text-primary"
+                        onClick={() => window.electronAPI.openExternal(`file:///${lastOutputPath.replace(/\\/g, '/').replace(/\/[^/]+$/, '')}`)}
+                      >
+                        <FolderOpen className="h-5 w-5" />
+                        {t.conversion.openFolder}
+                      </Button>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
 
           {/* Conversion Progress */}
           {isConverting && (
-            <ConversionProgress progress={progress} status={status} />
+            <ConversionProgress progress={progress} status={status} onCancel={handleCancel} />
           )}
 
           {/* Error Display */}
@@ -1168,44 +1204,6 @@ function App() {
             <Card className="border-destructive">
               <CardContent className="py-3">
                 <p className="text-destructive text-center text-sm">{error}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Action Buttons */}
-          {file && bookContent && isProviderReady && (
-            <div className="w-full">
-              {!isConverting ? (
-                <Button
-                  onClick={handleConvert}
-                  disabled={!isModelLoadedForLanguage || !isSelectedVoiceValid}
-                  className="w-full h-12 text-base gap-2"
-                  title={!isModelLoadedForLanguage ? t.voice.loadModelFirst : ''}
-                >
-                  <Play className="h-5 w-5" />
-                  {!isModelLoadedForLanguage ? t.conversion.loadModelToConvert : t.conversion.convertToMp3}
-                </Button>
-              ) : (
-                <Button
-                  variant="destructive"
-                  onClick={handleCancel}
-                  className="w-full h-12 text-base gap-2"
-                >
-                  <X className="h-5 w-5" />
-                  {t.common.cancel}
-                </Button>
-              )}
-            </div>
-          )}
-
-          {/* Success Message */}
-          {!isConverting && status === t.conversion.completed && (
-            <Card className="border-primary">
-              <CardContent className="py-3">
-                <div className="flex items-center justify-center gap-2 text-primary text-sm">
-                  <Download className="h-4 w-4" />
-                  <span className="font-medium">{t.conversion.audioSaved}</span>
-                </div>
               </CardContent>
             </Card>
           )}

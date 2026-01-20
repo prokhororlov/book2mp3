@@ -229,6 +229,7 @@ export const en: Translations = {
     convertToMp3: 'Convert to MP3',
     cancelled: 'Conversion cancelled',
     audioSaved: 'Audio file saved successfully!',
+    openFolder: 'Open folder',
   },
 
   // Voice selector
@@ -273,6 +274,8 @@ export const en: Translations = {
     numbersToWords: 'Numbers converted to words',
     sentencePause: 'Sentence Pause',
     previewTextLabel: 'Preview Text',
+    ruaccent: 'Stress Marks (Russian)',
+    ruaccentDescription: 'Automatically add stress marks to improve pronunciation',
   },
 
   // Updates

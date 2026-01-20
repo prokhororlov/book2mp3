@@ -660,6 +660,37 @@ torch.load = _patched_load
 app = Flask(__name__)
 models = {"silero": {"ru": None, "en": None}, "coqui": None}
 coqui_lock = threading.Lock()
+ruaccent_model = None
+
+def load_ruaccent():
+    """Lazy load ruaccent model for Russian stress placement."""
+    global ruaccent_model
+    if ruaccent_model is None:
+        try:
+            from ruaccent import RUAccent
+            ruaccent_model = RUAccent()
+            ruaccent_model.load(omograph_model_size='turbo', use_dictionary=True)
+            print("ruaccent model loaded successfully", file=sys.stderr)
+        except ImportError:
+            print("ruaccent not installed, stress placement disabled", file=sys.stderr)
+            return None
+        except Exception as e:
+            print(f"Failed to load ruaccent: {e}", file=sys.stderr)
+            return None
+    return ruaccent_model
+
+def apply_stress_marks(text, lang):
+    """Apply Russian stress marks to text if ruaccent is available and lang is Russian."""
+    if lang not in ['ru', 'ru-ru', 'ru_ru']:
+        return text
+    model = load_ruaccent()
+    if model is None:
+        return text
+    try:
+        return model.process_all(text)
+    except Exception as e:
+        print(f"ruaccent processing failed: {e}", file=sys.stderr)
+        return text
 
 def detect_device():
     """Detect best available compute device. Priority: CUDA > CPU"""
@@ -720,6 +751,11 @@ def load_silero_model(lang):
     model.to(torch.device(device))
     models["silero"][lang] = model
     print(f"Silero {lang} loaded on {device}. Memory: {get_memory_gb():.2f} GB", file=sys.stderr)
+    # Pre-load ruaccent model when loading Russian Silero
+    if lang == 'ru':
+        print("Pre-loading ruaccent model...", file=sys.stderr)
+        load_ruaccent()
+        print(f"Silero ready. Memory: {get_memory_gb():.2f} GB", file=sys.stderr)
 
 def generate_silero(text, speaker, lang, rate=1.0, sr=48000):
     if models["silero"].get(lang) is None:
@@ -813,10 +849,13 @@ def generate():
     data = request.json or {}
     engine, text, speaker = data.get("engine"), data.get("text"), data.get("speaker")
     lang, rate = data.get("language", "ru"), data.get("rate", 1.0)
+    use_ruaccent = data.get("use_ruaccent", False)
     if not all([engine, text, speaker]):
         return jsonify({"error": "Missing params"}), 400
     try:
-        audio = generate_silero(text, speaker, lang, rate) if engine == "silero" else generate_coqui(text, speaker, lang)
+        # Apply ruaccent stress marks only for Silero (not for Coqui)
+        processed_text = apply_stress_marks(text, lang) if (engine == "silero" and use_ruaccent) else text
+        audio = generate_silero(processed_text, speaker, lang, rate) if engine == "silero" else generate_coqui(text, speaker, lang)
         return Response(audio, mimetype="audio/wav")
     except Exception as e:
         import traceback
